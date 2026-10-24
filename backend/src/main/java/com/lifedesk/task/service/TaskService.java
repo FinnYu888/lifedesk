@@ -51,6 +51,12 @@ public class TaskService {
     }
 
     public Task move(Long id, String newStatus) {
+        if (newStatus == null || newStatus.trim().isEmpty()) {
+            throw new BizException(400, "缺少必填参数 status");
+        }
+        if (!"todo".equals(newStatus) && !"doing".equals(newStatus) && !"done".equals(newStatus)) {
+            throw new BizException(400, "无效的 status: " + newStatus + "（仅支持 todo / doing / done）");
+        }
         Task task = taskMapper.selectById(id);
         if (task == null) {
             throw new BizException("任务不存在");

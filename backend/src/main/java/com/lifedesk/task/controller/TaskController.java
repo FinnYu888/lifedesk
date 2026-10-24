@@ -31,9 +31,14 @@ public class TaskController {
         return R.ok(taskService.create(task));
     }
 
+    /**
+     * 移动任务到新的状态列（todo / doing / done）。
+     * 前端用 JSON body {"status":"doing"} 调用，避免 @RequestParam 缺省时报 500。
+     */
     @PutMapping("/{id}/move")
-    public R<Task> move(@PathVariable Long id, @RequestParam String status) {
-        return R.ok(taskService.move(id, status));
+    public R<Task> move(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        String newStatus = body == null ? null : body.get("status");
+        return R.ok(taskService.move(id, newStatus));
     }
 
     @DeleteMapping("/{id}")
