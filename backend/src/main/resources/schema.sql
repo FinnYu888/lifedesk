@@ -14,12 +14,15 @@ DROP TABLE IF EXISTS alert;
 DROP TABLE IF EXISTS perf_metric;
 DROP TABLE IF EXISTS server_status;
 DROP TABLE IF EXISTS workout_record;
+DROP TABLE IF EXISTS diet_record;
 DROP TABLE IF EXISTS diet_check;
 DROP TABLE IF EXISTS calorie_record;
 DROP TABLE IF EXISTS weight_record;
 DROP TABLE IF EXISTS exercise_plan;
 DROP TABLE IF EXISTS step_record;
 DROP TABLE IF EXISTS vital_sign;
+DROP TABLE IF EXISTS exercise_dict;
+DROP TABLE IF EXISTS food_dict;
 DROP TABLE IF EXISTS sys_user;
 
 -- ========== 用户 ==========
@@ -152,17 +155,65 @@ CREATE TABLE perf_metric (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='24h 性能指标';
 
 -- ========== 个人健康 ==========
+CREATE TABLE exercise_dict (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(64) NOT NULL COMMENT '动作名，如 卧推/深蹲/硬拉',
+    part VARCHAR(32) NOT NULL COMMENT '部位：胸/背/腿/核心/肩臂/有氧',
+    met DOUBLE DEFAULT 5.0 COMMENT 'MET 代谢当量，用于时长模式计算',
+    kcal_per_set DOUBLE DEFAULT 8.0 COMMENT '每组默认消耗 kcal，用于组数模式',
+    icon VARCHAR(32) DEFAULT 'star' COMMENT '图标枚举',
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_part(part)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='运动动作字典';
+
+CREATE TABLE food_dict (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(64) NOT NULL COMMENT '食物名，如 米饭/鸡胸肉/苹果',
+    category VARCHAR(32) NOT NULL COMMENT '主食/肉蛋/蔬菜/水果/饮品/零食',
+    kcal_per100g DOUBLE NOT NULL COMMENT '每 100g 卡路里',
+    default_amount INT DEFAULT 100 COMMENT '默认份量 g/ml',
+    default_unit VARCHAR(8) DEFAULT 'g' COMMENT '默认单位 g/ml/份',
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_category(category)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='食物字典';
+
 CREATE TABLE workout_record (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    part VARCHAR(32) NOT NULL COMMENT '部位：胸/背/腿',
-    plan_count INT DEFAULT 0,
-    done_count INT DEFAULT 0,
+    exercise_id BIGINT DEFAULT NULL COMMENT '关联 exercise_dict.id',
+    exercise_name VARCHAR(64) NOT NULL COMMENT '动作名冗余，便于列表展示',
+    part VARCHAR(32) NOT NULL COMMENT '部位冗余：胸/背/腿/核心/肩臂/有氧',
+    sets INT DEFAULT 0 COMMENT '组数',
+    reps INT DEFAULT 0 COMMENT '每组次数',
+    weight_kg DOUBLE DEFAULT 0 COMMENT '负重 kg（有氧/核心可 0）',
+    duration_min INT DEFAULT 0 COMMENT '时长 分钟（有氧/拉伸优先）',
+    calories_burned DOUBLE DEFAULT 0 COMMENT '消耗 kcal，后端自动计算',
+    plan_count INT DEFAULT 0 COMMENT '原计划组数，保留兼容',
+    done_count INT DEFAULT 0 COMMENT '实际完成组数',
     status VARCHAR(16) DEFAULT 'done' COMMENT 'done/pending',
     record_date DATE DEFAULT NULL,
     deleted TINYINT DEFAULT 0,
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_date(record_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='健身动作记录';
+
+CREATE TABLE diet_record (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    food_id BIGINT DEFAULT NULL COMMENT '关联 food_dict.id',
+    food_name VARCHAR(64) NOT NULL COMMENT '食物名冗余',
+    meal VARCHAR(16) NOT NULL COMMENT '餐次：breakfast/lunch/dinner/snack',
+    amount_g DOUBLE NOT NULL COMMENT '摄入量 g/ml',
+    calories_intake DOUBLE DEFAULT 0 COMMENT '摄入 kcal，后端自动计算',
+    record_date DATE DEFAULT NULL,
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_date_meal(record_date, meal)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='饮食摄入记录';
 
 CREATE TABLE diet_check (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,

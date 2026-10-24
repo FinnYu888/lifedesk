@@ -11,6 +11,15 @@ import java.util.Map;
 /**
  * 个人健康 Controller。
  *
+ * <p>覆盖 6 大健康组件只读接口 + 录入闭环：
+ * <ul>
+ *   <li>字典 GET /exercise-dict /food-dict</li>
+ *   <li>录入 POST /workout /diet（自动计算消耗/摄入）</li>
+ *   <li>汇总 GET /today-summary /trend</li>
+ *   <li>删除 DELETE /workout/{id} /diet/{id}</li>
+ *   <li>总览 GET /overview（含 today_summary + trend + 字典）</li>
+ * </ul>
+ *
  * @author LifeDesk
  */
 @RestController
@@ -20,6 +29,7 @@ public class HealthController {
 
     private final HealthService healthService;
 
+    // ===== 只读 =====
     @GetMapping("/stat")
     public R<Map<String, Object>> stat() {
         return R.ok(healthService.getStat());
@@ -69,5 +79,51 @@ public class HealthController {
     @PostMapping("/record")
     public R<Map<String, Object>> record(@RequestBody Map<String, Object> body) {
         return R.ok(healthService.record(body));
+    }
+
+    // ===== 字典 =====
+    @GetMapping("/exercise-dict")
+    public R<List<com.lifedesk.health.entity.ExerciseDict>> exerciseDict() {
+        return R.ok(healthService.listExerciseDict());
+    }
+
+    @GetMapping("/food-dict")
+    public R<List<com.lifedesk.health.entity.FoodDict>> foodDict(
+            @RequestParam(value = "category", required = false) String category) {
+        return R.ok(healthService.listFoodDict(category));
+    }
+
+    // ===== 录入闭环 =====
+    @PostMapping("/workout")
+    public R<Map<String, Object>> addWorkout(@RequestBody Map<String, Object> body) {
+        return R.ok(healthService.addWorkout(body));
+    }
+
+    @PostMapping("/diet")
+    public R<Map<String, Object>> addDiet(@RequestBody Map<String, Object> body) {
+        return R.ok(healthService.addDiet(body));
+    }
+
+    @DeleteMapping("/workout/{id}")
+    public R<Void> deleteWorkout(@PathVariable("id") Long id) {
+        healthService.deleteWorkout(id);
+        return R.ok();
+    }
+
+    @DeleteMapping("/diet/{id}")
+    public R<Void> deleteDiet(@PathVariable("id") Long id) {
+        healthService.deleteDiet(id);
+        return R.ok();
+    }
+
+    // ===== 汇总 =====
+    @GetMapping("/today-summary")
+    public R<Map<String, Object>> todaySummary() {
+        return R.ok(healthService.todaySummary());
+    }
+
+    @GetMapping("/trend")
+    public R<List<Map<String, Object>>> trend() {
+        return R.ok(healthService.trend7d());
     }
 }
