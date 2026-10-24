@@ -1,6 +1,8 @@
 -- LifeDesk 数据库表结构（启动时自动执行）
 -- 数据库: workbench (已在 jdbc url 中指定)
 -- 开发期使用 DROP+CREATE，data.sql 配合 INSERT IGNORE 保证幂等
+-- SET NAMES utf8mb4 确保连接层字符集与表字符集一致，避免字段注释/中文数据乱码
+SET NAMES utf8mb4;
 
 DROP TABLE IF EXISTS commit_activity;
 DROP TABLE IF EXISTS milestone;

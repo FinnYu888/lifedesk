@@ -1,5 +1,7 @@
 -- LifeDesk 初始示例数据（与设计文档示例一致）
 -- 使用 INSERT IGNORE 避免重启重复插入
+-- SET NAMES utf8mb4 确保连接层字符集与表字符集一致，避免中文数据乱码
+SET NAMES utf8mb4;
 
 -- 用户
 INSERT IGNORE INTO sys_user(id, nickname, avatar) VALUES
