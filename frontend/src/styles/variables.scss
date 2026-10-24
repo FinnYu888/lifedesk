@@ -1,0 +1,35 @@
+// ==================== LifeDesk 设计令牌（深色主题） ====================
+// 来源: 00_LifeDesk功能设计总览.md §5
+
+// 主色 accent: 紫色 #7C3AED / #A78BFA
+$accent: #7c3aed;
+$accent-light: #a78bfa;
+
+// 状态色
+$color-positive: #2dd4bf; // 青绿 正向/完成/运行中
+$color-warning: #fbbf24;  // 橙黄 进行中/超期预警
+$color-danger: #f87171;    // 红色 紧急/告警
+$color-neutral: #6b7280;    // 灰色 待完善/无安排
+
+// 背景
+$bg-page: #0f0a1f;       // 近黑背景
+$bg-card: #1c1530;       // 卡片深紫灰底
+$bg-card-hover: #251a3d;
+$bg-sidebar: #170f2b;
+
+// 描边
+$border-subtle: rgba(167, 139, 250, 0.15);
+$border-accent: rgba(124, 58, 237, 0.4);
+
+// 文字
+$text-primary: #ede9fe;
+$text-secondary: #a8a0c8;
+$text-tertiary: #6b6388;
+
+// 圆角
+$radius-card: 14px;
+$radius-sm: 8px;
+
+// 阴影
+$shadow-card: 0 8px 28px rgba(0, 0, 0, 0.35);
+$glow-accent: 0 0 24px rgba(124, 58, 237, 0.35);

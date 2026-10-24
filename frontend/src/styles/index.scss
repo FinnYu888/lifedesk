@@ -1,0 +1,76 @@
+@use "./variables.scss" as *;
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: $bg-page;
+  color: $text-primary;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+a {
+  color: $accent-light;
+  text-decoration: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(167, 139, 250, 0.25);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+// 通用工具类
+.flex {
+  display: flex;
+}
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.text-positive {
+  color: $color-positive;
+}
+.text-warning {
+  color: $color-warning;
+}
+.text-danger {
+  color: $color-danger;
+}
+
+// 卡片基础
+.ld-card {
+  background: $bg-card;
+  border-radius: $radius-card;
+  border: 1px solid $border-subtle;
+  box-shadow: $shadow-card;
+  padding: 18px 20px;
+  transition: all 0.2s;
+  &:hover {
+    border-color: $border-accent;
+    background: $bg-card-hover;
+  }
+}
