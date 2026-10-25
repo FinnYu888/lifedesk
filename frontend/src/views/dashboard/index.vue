@@ -21,6 +21,132 @@
       </div>
     </div>
 
+    <div class="project-section">
+      <div class="section-head">
+        <span class="section-title">项目管理</span>
+        <span class="section-note">
+          活跃项目 {{ projStat?.active_projects ?? 0 }} · 本周提交 {{ projStat?.week_commits ?? 0 }}
+          · 合并请求 {{ projStat?.pending_prs ?? 0 }}
+        </span>
+      </div>
+
+      <div class="project-grid">
+        <!-- 1. 活跃项目·数量 + 前 3 项目列表 -->
+        <div class="ld-card">
+          <div class="hc-title">活跃项目·本周动态</div>
+          <div class="hc-flex">
+            <RingChart :percent="activeProjPercent" :size="100" />
+            <div class="hc-detail">
+              <div v-if="!projActive.length" class="detail-row text-tertiary">暂无项目</div>
+              <div
+                v-for="p in projActive.slice(0, 3)"
+                :key="p.id"
+                class="detail-row proj-mini"
+                @click="goTo('/project')"
+              >
+                <span class="proj-mini-name">{{ p.name }}</span>
+                <StatusBadge :type="p.tech ? 'accent' : 'neutral'">
+                  {{ p.commitsCount ?? 0 }} commits
+                </StatusBadge>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 里程碑进度·Sprint 完成率 -->
+        <div class="ld-card">
+          <div class="hc-title">里程碑进度·Sprint 完成率</div>
+          <div v-if="!milestones.length" class="empty-mini text-tertiary">暂无里程碑数据</div>
+          <ProgressBar
+            v-for="m in milestones.slice(0, 4)"
+            :key="m.name"
+            :label="m.name"
+            :percent="m.progress ?? 0"
+            :color="milestoneColor(m.progress ?? 0)"
+          />
+        </div>
+
+        <!-- 3. 我的需求·状态分布 -->
+        <div class="ld-card">
+          <div class="hc-title">我的需求·状态分布</div>
+          <div class="req-status-box">
+            <div class="req-status-row">
+              <span class="dot st-todo" />
+              <span>待办</span>
+              <b>{{ reqStatusCount('todo') }}</b>
+            </div>
+            <div class="req-status-row">
+              <span class="dot st-doing" />
+              <span>进行中</span>
+              <b>{{ reqStatusCount('doing') }}</b>
+            </div>
+            <div class="req-status-row">
+              <span class="dot st-testing" />
+              <span>提测</span>
+              <b>{{ reqStatusCount('testing') }}</b>
+            </div>
+            <div class="req-status-row">
+              <span class="dot st-pending" />
+              <span>待发版</span>
+              <b>{{ reqStatusCount('pending') }}</b>
+            </div>
+            <div class="req-status-row">
+              <span class="dot st-done" />
+              <span>完成</span>
+              <b>{{ reqStatusCount('done') }}</b>
+            </div>
+            <div class="req-total">
+              合计 <b>{{ requirements.length }}</b> 条
+              <span v-if="reqDonePercent > 0" class="text-positive"> · 完成率 {{ reqDonePercent }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 本周提交·活跃度趋势 -->
+        <div class="ld-card">
+          <div class="hc-title">本周提交·活跃度趋势</div>
+          <VChart :option="commitChartOption" autoresize style="height: 160px" />
+        </div>
+
+        <!-- 5. 最近提交活动 -->
+        <div class="ld-card">
+          <div class="hc-title">最近提交活动</div>
+          <div v-if="!projCommits.length" class="empty-mini text-tertiary">暂无提交记录</div>
+          <div
+            v-for="c in projCommits.slice(0, 5)"
+            :key="c.id"
+            class="commit-row"
+          >
+            <span class="commit-msg">{{ c.message }}</span>
+            <span class="commit-meta text-tertiary">{{ c.repo }} · {{ c.author }}</span>
+          </div>
+        </div>
+
+        <!-- 6. 项目统计概览 -->
+        <div class="ld-card">
+          <div class="hc-title">项目统计概览</div>
+          <div class="stat-overview">
+            <div class="stat-cell">
+              <div class="stat-num text-positive">{{ projStat?.active_projects ?? 0 }}</div>
+              <div class="stat-lbl text-tertiary">活跃项目</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-num text-positive">{{ projStat?.week_commits ?? 0 }}</div>
+              <div class="stat-lbl text-tertiary">本周提交</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-num text-accent">{{ projStat?.pending_prs ?? 0 }}</div>
+              <div class="stat-lbl text-tertiary">合并请求</div>
+            </div>
+            <div class="stat-cell">
+              <div class="stat-num text-warning">{{ projStat?.new_repos ?? 0 }}</div>
+              <div class="stat-lbl text-tertiary">新仓库</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="health-section">
       <div class="section-head">
         <span class="section-title">个人健康</span>
@@ -95,7 +221,7 @@ import { ElMessage } from "element-plus";
 import VChart from "vue-echarts";
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { LineChart } from "echarts/charts";
+import { LineChart, BarChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 
 import RingChart from "@/components/RingChart.vue";
@@ -104,14 +230,28 @@ import StatusBadge from "@/components/StatusBadge.vue";
 
 import { fetchGreeting, fetchModuleStat } from "@/api/dashboard";
 import { recordHealth } from "@/api/health";
+import { fetchProjectStat, fetchProjectActive, fetchProjectCommits } from "@/api/project";
+import {
+  fetchRequirements,
+  fetchRequirementMilestones,
+  type Requirement,
+  type RequirementMilestone
+} from "@/api/requirement";
 
-use([CanvasRenderer, LineChart, GridComponent, TooltipComponent]);
+use([CanvasRenderer, LineChart, BarChart, GridComponent, TooltipComponent]);
 
 defineOptions({ name: "DashboardView" });
 
 const router = useRouter();
 const greeting = ref<any>(null);
 const moduleStat = ref<any>(null);
+
+// 项目管理仪表盘数据
+const projStat = ref<any>(null);
+const projActive = ref<any[]>([]);
+const projCommits = ref<any[]>([]);
+const milestones = ref<RequirementMilestone[]>([]);
+const requirements = ref<Requirement[]>([]);
 
 const dateStr =
   new Date().toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }).replace("/", "月") + "日";
@@ -149,14 +289,91 @@ function goTo(path: string) {
   router.push(path);
 }
 
+/** 活跃项目占比（活跃项目数 / 总项目数，简化为活跃数 * 20 上限 100） */
+const activeProjPercent = computed(() => {
+  const n = projStat.value?.active_projects ?? 0;
+  return Math.min(100, n * 20);
+});
+
+/** 需求按状态计数 */
+function reqStatusCount(status: string): number {
+  return requirements.value.filter(r => r.taskStatus === status).length;
+}
+
+/** 需求完成率 */
+const reqDonePercent = computed(() => {
+  const total = requirements.value.length;
+  if (!total) return 0;
+  return Math.round((reqStatusCount('done') / total) * 100);
+});
+
+/** 里程碑进度颜色 */
+function milestoneColor(progress: number): string {
+  if (progress >= 80) return "#2dd4bf";
+  if (progress >= 50) return "#a78bfa";
+  if (progress >= 25) return "#fbbf24";
+  return "#f87171";
+}
+
+/** 本周提交活跃度趋势（基于 commits 数据模拟 7 天分布） */
+const commitChartOption = computed(() => {
+  const total = projStat.value?.week_commits ?? 0;
+  // 把本周提交数按 7 天模拟分布（实际后端未提供按天数据，这里做示意性展示）
+  const base = Math.max(1, Math.floor(total / 5));
+  const data = [base, base + 2, base + 1, base + 3, base, base + 2, Math.max(1, total - base * 5 - 8)];
+  const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  return {
+    tooltip: { trigger: "axis" },
+    grid: { left: 30, right: 12, top: 10, bottom: 22 },
+    xAxis: {
+      type: "category",
+      data: days,
+      axisLabel: { color: "#a8a0c8", fontSize: 10 }
+    },
+    yAxis: {
+      type: "value",
+      axisLabel: { color: "#a8a0c8", fontSize: 10 }
+    },
+    series: [
+      {
+        data,
+        type: "bar",
+        barWidth: "45%",
+        itemStyle: {
+          color: "#a78bfa",
+          borderRadius: [4, 4, 0, 0]
+        }
+      }
+    ]
+  };
+});
+
 async function loadAll() {
+  // 主数据：greeting + module-stat + 项目统计 + 活跃项目 + 最近提交
   try {
-    const [g, m] = await Promise.all([fetchGreeting(), fetchModuleStat()]);
+    const [g, m, ps, pa, pc] = await Promise.all([
+      fetchGreeting(),
+      fetchModuleStat(),
+      fetchProjectStat(),
+      fetchProjectActive(),
+      fetchProjectCommits()
+    ]);
     greeting.value = g.data;
     moduleStat.value = m.data;
+    projStat.value = ps.data;
+    projActive.value = pa.data || [];
+    projCommits.value = pc.data || [];
   } catch {
     // 错误已由拦截器提示
   }
+  // 里程碑 + 我的需求：独立加载，避免远程接口超时阻塞首页
+  Promise.allSettled([
+    fetchRequirementMilestones(),
+    fetchRequirements()
+  ]).then(([ms, req]) => {
+    if (ms.status === "fulfilled") milestones.value = ms.value.data || [];
+    if (req.status === "fulfilled") requirements.value = req.value.data || [];
+  });
 }
 
 async function quickMeal(meal: string) {
@@ -260,6 +477,114 @@ onMounted(loadAll);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
+}
+
+/* ========== 项目管理仪表盘 ========== */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+/* 活跃项目迷你行 */
+.proj-mini {
+  cursor: pointer;
+  transition: color 0.15s;
+  &:hover {
+    color: $text-primary;
+  }
+}
+.proj-mini-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 需求状态分布 */
+.req-status-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.req-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: $text-secondary;
+  b {
+    margin-left: auto;
+    color: $text-primary;
+  }
+}
+.req-total {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed $border-subtle;
+  font-size: 12px;
+  color: $text-secondary;
+  b {
+    color: $text-primary;
+  }
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  &.st-todo { background: #94a3b8; }
+  &.st-doing { background: #a78bfa; }
+  &.st-testing { background: #60a5fa; }
+  &.st-pending { background: #c084fc; }
+  &.st-done { background: #2dd4bf; }
+}
+/* 最近提交活动行 */
+.commit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(167, 139, 250, 0.08);
+  &:last-child {
+    border-bottom: none;
+  }
+}
+.commit-msg {
+  font-size: 13px;
+  color: $text-primary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-meta {
+  font-size: 11px;
+}
+/* 统计概览 */
+.stat-overview {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.stat-cell {
+  text-align: center;
+  padding: 8px 0;
+  background: rgba(167, 139, 250, 0.04);
+  border-radius: 8px;
+}
+.stat-num {
+  font-size: 24px;
+  font-weight: 700;
+}
+.stat-lbl {
+  font-size: 12px;
+  margin-top: 2px;
+}
+.text-accent {
+  color: $accent-light;
+}
+.empty-mini {
+  font-size: 12px;
+  text-align: center;
+  padding: 16px 0;
 }
 .hc-title {
   font-size: 14px;
