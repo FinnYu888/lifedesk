@@ -297,7 +297,7 @@
       title="需求详情"
       width="760px"
       :close-on-click-modal="true"
-      class="ld-dialog"
+      class="ld-dialog req-detail-dialog"
       modal-class="ld-overlay"
     >
       <div v-loading="detailDialog.loading" class="req-detail-body">
@@ -1866,5 +1866,106 @@ onMounted(load);
   font-size: 13px;
   text-align: center;
   padding: 32px 0;
+}
+
+/* ========== 需求详情弹窗专属：白底黑字（用户要求字体黑色） ========== */
+/* 覆盖 ld-dialog 的紫黑底色，改为白色玻璃底，黑色字体才清晰可读 */
+.req-detail-dialog :deep(.el-dialog) {
+  --el-dialog-bg-color: rgba(255, 255, 255, 0.96);
+  --el-bg-color: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 0.96) !important;
+  background-color: rgba(255, 255, 255, 0.96) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.req-detail-dialog :deep(.el-dialog__header) {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.02);
+}
+.req-detail-dialog :deep(.el-dialog__title) {
+  color: #1f2937;
+}
+.req-detail-dialog :deep(.el-dialog__headerbtn .el-dialog__close) {
+  color: #6b7280;
+}
+.req-detail-dialog :deep(.el-dialog__headerbtn:hover .el-dialog__close) {
+  color: #1f2937;
+}
+.req-detail-dialog :deep(.el-dialog__body) {
+  color: #1f2937;
+}
+/* 标题区：taskNo 标签 + 标题文字 */
+.req-detail-dialog .detail-title {
+  color: #111827;
+}
+.req-detail-dialog .detail-task-no {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
+}
+/* 元信息网格 */
+.req-detail-dialog .detail-meta {
+  background: rgba(0, 0, 0, 0.025);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+.req-detail-dialog .meta-label {
+  color: #6b7280;
+}
+.req-detail-dialog .meta-value {
+  color: #374151;
+}
+/* section 标题 */
+.req-detail-dialog .detail-section-title {
+  color: #6b7280;
+}
+/* 标题独立展示 */
+.req-detail-dialog .detail-title-display {
+  color: #111827;
+  background: rgba(0, 0, 0, 0.025);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+/* 详情正文 v-html 渲染 */
+.req-detail-dialog .detail-content {
+  color: #1f2937;
+}
+.req-detail-dialog .detail-content :deep(p) {
+  background: transparent !important;
+  color: #1f2937;
+}
+.req-detail-dialog .detail-content :deep(ol),
+.req-detail-dialog .detail-content :deep(ul) {
+  background: transparent !important;
+  color: #1f2937;
+}
+.req-detail-dialog .detail-content :deep(li) {
+  background: transparent !important;
+  color: #1f2937;
+}
+.req-detail-dialog .detail-content :deep(figure) {
+  background: transparent !important;
+}
+.req-detail-dialog .detail-content :deep(img) {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #f3f4f6;
+}
+.req-detail-dialog .detail-content :deep(a) {
+  color: #4f46e5;
+  border-bottom: 1px dashed rgba(79, 70, 229, 0.4);
+}
+.req-detail-dialog .detail-content :deep(a:hover) {
+  border-bottom-style: solid;
+}
+.req-detail-dialog .detail-content :deep(div),
+.req-detail-dialog .detail-content :deep(span),
+.req-detail-dialog .detail-content :deep(article),
+.req-detail-dialog .detail-content :deep(section),
+.req-detail-dialog .detail-content :deep(blockquote) {
+  background: transparent !important;
+  color: #1f2937;
+}
+.req-detail-dialog .detail-empty {
+  color: #9ca3af;
+}
+.req-detail-dialog :deep(.el-loading-mask) {
+  background: rgba(255, 255, 255, 0.6);
 }
 </style>
