@@ -368,7 +368,7 @@
             </div>
           </div>
 
-          <!-- 详情正文：title + content（仅纯文本展示，去除所有 HTML 标签） -->
+          <!-- 详情正文：title + content（v-html 渲染，含图片代理 + 段落/列表/图片原生展示） -->
           <div class="detail-section">
             <div class="detail-section-title">标题</div>
             <div class="detail-title-display">
@@ -379,8 +379,9 @@
             <div class="detail-section-title">详情内容</div>
             <div
               v-if="detailDialog.data.content"
-              class="detail-content detail-content-text"
-            >{{ stripHtmlToText(detailDialog.data.content) }}</div>
+              class="detail-content"
+              v-html="processContent(detailDialog.data.content)"
+            />
             <div v-else class="detail-content detail-empty text-tertiary">
               （无详情内容）
             </div>
@@ -587,20 +588,34 @@ async function onSaveAuthorization() {
   }
   authSaving.value = true;
   try {
+    console.log("[onSaveAuthorization] 开始设置 authorization, token 长度:", token.length);
     const r = await setRequirementAuthorization(token);
     authStatus.value = r.data;
     authExpired.value = false;
     authInput.value = "";
     ElMessage.success("authorization 已保存，正在刷新数据");
-    // 重新加载"我的需求" + "里程碑进度"
-    const [req, ms] = await Promise.all([
+    console.log("[onSaveAuthorization] authorization 已设置成功，source=", r.data?.source, "，开始刷新需求列表 + 里程碑进度");
+    // 用 allSettled 让两个请求各自独立完成，互不影响（避免里程碑失败导致需求列表也不刷新）
+    const [reqResult, msResult] = await Promise.allSettled([
       fetchRequirements(reqSprint.value, reqStatus.value, reqKeyword.value),
       fetchRequirementMilestones()
     ]);
-    requirements.value = req.data || [];
-    milestones.value = ms.data || [];
+    if (reqResult.status === "fulfilled") {
+      requirements.value = reqResult.value.data || [];
+      console.log("[onSaveAuthorization] 需求列表刷新成功，数量:", requirements.value.length);
+    } else {
+      console.error("[onSaveAuthorization] 需求列表刷新失败:", reqResult.reason);
+      requirements.value = [];
+    }
+    if (msResult.status === "fulfilled") {
+      milestones.value = msResult.value.data || [];
+      console.log("[onSaveAuthorization] 里程碑进度刷新成功，数量:", milestones.value.length);
+    } else {
+      console.error("[onSaveAuthorization] 里程碑进度刷新失败:", msResult.reason);
+    }
     authExpired.value = requirements.value.length === 0;
-  } catch {
+  } catch (e) {
+    console.error("[onSaveAuthorization] 整体失败:", e);
     /* 拦截器已提示 */
   } finally {
     authSaving.value = false;
@@ -1565,19 +1580,20 @@ onMounted(load);
   -webkit-backdrop-filter: blur(6px);
 }
 
-/* 弹窗容器：玻璃质感（与 .ld-card 一致） */
+/* 弹窗容器：紫黑玻璃质感（与系统风格一致） */
 /* 覆盖 el-dialog 默认 CSS 变量（默认为白色 --el-bg-color / --el-dialog-bg-color），
- * 否则即使设置了 background !important，内部某些子元素仍会继承白色变量导致白底 */
+ * 改为紫黑色，避免内部元素继承白色变量导致白底 */
 .ld-dialog :deep(.el-dialog),
 .ld-dialog.el-dialog,
 .ld-dialog :deep(.el-overlay-dialog) {
-  --el-dialog-bg-color: transparent;
-  --el-bg-color: transparent;
+  --el-dialog-bg-color: rgba(28, 28, 36, 0.78);
+  --el-bg-color: rgba(28, 28, 36, 0.78);
   --el-bg-color-page: transparent;
   --el-mask-color: transparent;
 }
 .ld-dialog :deep(.el-dialog) {
-  background: transparent !important;
+  /* 紫黑半透明底色（系统风格），文字浅色清晰可见 */
+  background: rgba(28, 28, 36, 0.78) !important;
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1585,10 +1601,10 @@ onMounted(load);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   overflow: hidden;
   /* 关键：用 background-color + background 双重声明，确保覆盖 el-dialog 内联样式 */
-  background-color: transparent !important;
+  background-color: rgba(28, 28, 36, 0.78) !important;
   background-image: none !important;
 }
-/* el-dialog 内部所有可能残留白底的元素强制透明 */
+/* el-dialog 内部元素背景透明，跟随紫黑底色（避免各自带白底） */
 .ld-dialog :deep(.el-dialog__header),
 .ld-dialog :deep(.el-dialog__body),
 .ld-dialog :deep(.el-dialog__footer),
@@ -1792,16 +1808,59 @@ onMounted(load);
   line-height: 1.7;
   color: var(--ld-text-primary, rgba(255, 255, 255, 0.88));
   word-break: break-word;
+  /* 内容容器透明，跟随弹窗玻璃质感（避免白底） */
+  background: transparent !important;
+  padding: 4px 0;
 }
-/* 纯文本展示（去除 HTML 标签后） */
-.detail-content-text {
-  padding: 12px 14px;
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+/* v-html 渲染的 HTML 元素玻璃风格适配（背景全部透明，避免白底） */
+.detail-content :deep(p) {
+  margin: 6px 0;
+  background: transparent !important;
+}
+.detail-content :deep(ol),
+.detail-content :deep(ul) {
+  margin: 6px 0;
+  padding-left: 22px;
+  background: transparent !important;
+}
+.detail-content :deep(li) {
+  margin: 4px 0;
+  background: transparent !important;
+}
+/* li 内嵌套的 ol（二级列表）缩进 */
+.detail-content :deep(li ol),
+.detail-content :deep(li ul) {
+  margin: 4px 0 4px 0;
+}
+.detail-content :deep(figure) {
+  margin: 10px 0;
+  text-align: center;
+  background: transparent !important;
+}
+.detail-content :deep(img) {
+  max-width: 100%;
+  height: auto;
   border-radius: 8px;
-  white-space: pre-wrap;
-  max-height: 360px;
-  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  /* 图片本身背景用深色（避免透明 PNG 在白底下看不清） */
+  background: rgba(0, 0, 0, 0.2);
+  padding: 4px;
+}
+.detail-content :deep(a) {
+  color: #a78bfa;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(167, 139, 250, 0.4);
+}
+.detail-content :deep(a:hover) {
+  border-bottom-style: solid;
+}
+/* 块级元素全部透明背景（兜底，防止 content 中带 style 属性的白底） */
+.detail-content :deep(div),
+.detail-content :deep(span),
+.detail-content :deep(article),
+.detail-content :deep(section),
+.detail-content :deep(blockquote) {
+  background: transparent !important;
 }
 .detail-empty {
   font-size: 13px;

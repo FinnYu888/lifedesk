@@ -75,13 +75,15 @@ export interface RequirementAuthStatus {
  * @param status  可选任务状态过滤：todo/doing/testing/pending/done/cancel
  * @param keyword 可选关键词，按 任务详情/关联话题/产品/测试人 模糊匹配
  */
+// 加 cache: 'no-store' 防止浏览器缓存 GET 请求（避免设置 authorization 后页面仍显示旧数据）
 export const fetchRequirements = (
   sprint?: string,
   status?: string,
   keyword?: string
 ) =>
   http.get<any, Result>("/project/requirements", {
-    params: { sprint, status, keyword }
+    params: { sprint, status, keyword },
+    cache: "no-store"
   });
 
 /** 拉取需求详情（用户点击行触发，含 content HTML 含 img 标签） */
@@ -89,8 +91,9 @@ export const fetchRequirementDetail = (sourceId: string) =>
   http.get<any, Result>(`/project/requirements/${sourceId}/detail`);
 
 /** 拉取里程碑进度（按 sprint 聚合，sprint 后 8 位即里程碑日期） */
+// 单独设置 30s 超时：后端需串行调用 sprint/query + developTask/query + 每个 sprint 的 issue/query，耗时较长
 export const fetchRequirementMilestones = () =>
-  http.get<any, Result>("/project/milestones");
+  http.get<any, Result>("/project/milestones", { timeout: 30000 });
 
 /** 查询当前 authorization 设置状态（不返回 token 本身，避免泄漏） */
 export const getRequirementAuthStatus = () =>
