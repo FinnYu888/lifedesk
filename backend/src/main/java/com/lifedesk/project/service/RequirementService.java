@@ -378,6 +378,100 @@ public class RequirementService {
         }
     }
 
+    /**
+     * 图片代理：用 Authorization 头去远程拉取图片字节流，原样返回给前端。
+     *
+     * <p>用途：详情弹窗 content HTML 中的 {@code <img src="...">} 标签，浏览器渲染时无法附加
+     * 自定义 Authorization 头，对需要鉴权的图片资源会收到 401。前端把 img src 改写为
+     * {@code /api/project/requirements/img-proxy?url=<encoded>} 走后端代理，由本方法用
+     * Authorization 头拉取远程图片字节流后透传给浏览器。</p>
+     *
+     * <p>仅允许 http/https 协议，禁止 file/ftp 等协议，避免 SSRF 风险。
+     * 不限制域名白名单（远程图片可能托管在多个 CDN 子域上），但要求必须能被
+     * wetrans.cimc.cn 网关鉴权通过。</p>
+     *
+     * @param url 远程图片绝对 URL
+     * @return 图片字节流；调用失败返回 null
+     */
+    public byte[] fetchImage(String url) {
+        if (url == null || url.trim().isEmpty()) {
+            log.warn("fetchImage: url 为空");
+            return null;
+        }
+        // 安全校验：仅允许 http/https 协议，防止 file:/// 等被 SSRF
+        String lower = url.trim().toLowerCase();
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            log.warn("fetchImage: 协议不允许，url={}", url);
+            return null;
+        }
+
+        HttpURLConnection conn = null;
+        try {
+            URL u = new URL(url.trim());
+            conn = (HttpURLConnection) u.openConnection();
+
+            // HTTPS：仅对本请求关闭证书校验（与 query / getDetail 一致）
+            if (conn instanceof HttpsURLConnection) {
+                HttpsURLConnection https = (HttpsURLConnection) conn;
+                https.setSSLSocketFactory(SSL_TRUST_ALL_FACTORY);
+                https.setHostnameVerifier((hostname, session) -> true);
+            }
+
+            conn.setRequestMethod("GET");
+            // 鉴权头与 query / getDetail 接口一致：直接 Authorization: <token>
+            conn.setRequestProperty("Authorization", remoteToken);
+            conn.setRequestProperty("Accept", "image/*, */*");
+            conn.setRequestProperty("Connection", "close");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setInstanceFollowRedirects(true);
+
+            int status = conn.getResponseCode();
+            if (status != 200) {
+                log.warn("fetchImage: 远程图片响应异常 status={}, url={}", status, url);
+                return null;
+            }
+
+            // 读取字节流
+            try (InputStream is = conn.getInputStream()) {
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = is.read(buf)) != -1) {
+                    baos.write(buf, 0, n);
+                }
+                return baos.toByteArray();
+            }
+        } catch (java.net.UnknownHostException | java.net.ConnectException e) {
+            log.warn("fetchImage: 远程图片不可达 url={}, {}", url, e.getMessage());
+            return null;
+        } catch (Exception e) {
+            log.warn("fetchImage: 拉取异常 url={}, {} {}", url, e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    /** 根据 URL 后缀推断 Content-Type（图片类型）。支持带 query string 的 URL，如 {@code xxx.png?Expires=...} */
+    public String guessImageContentType(String url) {
+        if (url == null) return "image/jpeg";
+        // 去掉 query string（?...）和 fragment（#...），只保留路径部分用于后缀判断
+        String lower = url.toLowerCase();
+        int q = lower.indexOf('?');
+        if (q >= 0) lower = lower.substring(0, q);
+        int h = lower.indexOf('#');
+        if (h >= 0) lower = lower.substring(0, h);
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".bmp")) return "image/bmp";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        return "image/jpeg";
+    }
+
     /** 构造远程接口入参，从 application.yml 读取 */
     private Map<String, Object> buildRemotePayload() {
         Map<String, Object> p = new LinkedHashMap<>();

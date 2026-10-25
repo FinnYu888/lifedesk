@@ -149,7 +149,20 @@
             </template>
           </el-table-column>
           <el-table-column prop="topic" label="关联话题" width="120" show-overflow-tooltip />
-          <el-table-column prop="taskDetail" label="任务详情" min-width="240" show-overflow-tooltip />
+          <el-table-column prop="taskDetail" label="任务详情" min-width="240">
+            <template #default="{ row }">
+              <el-tooltip
+                :content="row.taskDetail || '—'"
+                placement="top"
+                :show-after="180"
+                :hide-after="0"
+                :enterable="false"
+                popper-class="req-task-tooltip"
+              >
+                <div class="task-detail-cell">{{ row.taskDetail || '—' }}</div>
+              </el-tooltip>
+            </template>
+          </el-table-column>
           <el-table-column prop="product" label="产品" width="110" show-overflow-tooltip />
           <el-table-column prop="tester" label="测试人" width="90" show-overflow-tooltip />
         </el-table>
@@ -320,13 +333,19 @@
             </div>
           </div>
 
-          <!-- 详情正文（HTML 含 img 标签，v-html 直接渲染图片） -->
+          <!-- 详情正文：title + content（含图片代理，浏览器 img 无法附加 Authorization 头，需走后端代理拉取） -->
+          <div class="detail-section">
+            <div class="detail-section-title">标题</div>
+            <div class="detail-title-display">
+              {{ detailDialog.data.title || '（无标题）' }}
+            </div>
+          </div>
           <div class="detail-section">
             <div class="detail-section-title">详情内容</div>
             <div
               v-if="detailDialog.data.content"
               class="detail-content"
-              v-html="detailDialog.data.content"
+              v-html="processContent(detailDialog.data.content)"
             />
             <div v-else class="detail-content detail-empty text-tertiary">
               （无详情内容）
@@ -733,6 +752,61 @@ async function onReqRowClick(row: Requirement) {
   }
 }
 
+/**
+ * content HTML 预处理：把所有 img 标签的 src 改为走后端图片代理。
+ *
+ * <p>原因：第三方需求接口 {@code wetrans.cimc.cn} 的图片资源可能：
+ * <ul>
+ *   <li>使用相对路径（如 {@code /upload/xxx.jpg}），浏览器基于前端域名请求会 404；</li>
+ *   <li>使用绝对 URL 但需要 Authorization 头，浏览器 {@code <img>} 标签无法附加自定义请求头，导致 401。</li>
+ * </ul>
+ * 统一改为 {@code /api/project/requirements/img-proxy?url=<encoded>}，由后端用 Authorization 头拉取后透传字节流。</p>
+ *
+ * <p><b>关键</b>：HTML 中 src 属性里的 {@code &} 通常被转义为 {@code &amp;}（如 OSS 带 Signature 的 URL），
+ * 必须在 URL 编码前先 HTML 反转义，否则后端拿到的 URL 含 {@code &amp;} 而非 {@code &}，
+ * 远程图片服务端会因签名不匹配返回 403/404。</p>
+ */
+function processContent(content: string | undefined): string {
+  if (!content) return "";
+  // 远程接口域名（用于补全相对路径）
+  const remoteBase = "https://wetrans.cimc.cn";
+  // 后端图片代理端点（vite 代理 /api → http://localhost:8080）
+  const proxyBase = "/api/project/requirements/img-proxy?url=";
+
+  // HTML 反转义：&amp; → &，&lt; → <，&gt; → >，&quot; → "，&#39; → '
+  const htmlUnescape = (s: string): string =>
+    s
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'");
+
+  let processed = content;
+
+  // 1) src="/xxx"（绝对路径但相对域名）→ 补全为 https://wetrans.cimc.cn/xxx 再走代理
+  processed = processed.replace(
+    /src=(["'])\/(?!\/)([^"'\s>]+)\1/gi,
+    (_m, q, path) => `src=${q}${proxyBase}${encodeURIComponent(remoteBase + "/" + htmlUnescape(path))}${q}`
+  );
+
+  // 2) src="https://wetrans.cimc.cn/xxx" 或 src="http(s)://其他域/xxx"（绝对 URL，可能需要鉴权）→ 直接走代理
+  //    但排除已经是代理地址的，避免重复编码
+  processed = processed.replace(
+    /src=(["'])(https?:\/\/(?!localhost)[^"'\s>]+)\1/gi,
+    (_m, q, url) =>
+      url.startsWith(proxyBase) ? _m : `src=${q}${proxyBase}${encodeURIComponent(htmlUnescape(url))}${q}`
+  );
+
+  // 3) src="xxx"（不以 / 或 http 开头的相对路径，少见）→ 拼接到 wetrans.cimc.cn 根
+  processed = processed.replace(
+    /src=(["'])((?!\/|https?:)[^"'\s>]+)\1/gi,
+    (_m, q, path) => `src=${q}${proxyBase}${encodeURIComponent(remoteBase + "/" + htmlUnescape(path))}${q}`
+  );
+
+  return processed;
+}
+
 /** 详情字段时间格式化：远程返回毫秒时间戳或 ISO 字符串，统一转为 yyyy-MM-dd HH:mm */
 function formatTime(v: any): string {
   if (v == null || v === "") return "—";
@@ -1101,6 +1175,37 @@ onMounted(load);
 .req-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-track {
   background: transparent;
 }
+/* 任务详情单元格：单行省略号（即使未截断，hover 时也通过 tooltip 展示全部内容） */
+.task-detail-cell {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* tooltip 自定义玻璃风格（popper-class 全局类，需用 :global 跨 scoped 边界） */
+:global(.req-task-tooltip.el-popper) {
+  background: rgba(28, 28, 36, 0.92) !important;
+  backdrop-filter: blur(14px) saturate(180%);
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 520px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  word-break: break-all;
+}
+/* tooltip 小三角箭头跟随玻璃质感 */
+:global(.req-task-tooltip.el-popper[data-popper-placement^=top] .el-popper__arrow::before),
+:global(.req-task-tooltip.el-popper[data-popper-placement^=bottom] .el-popper__arrow::before) {
+  background: rgba(28, 28, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
 .sprint-tag {
   display: inline-block;
   padding: 2px 8px;
@@ -1285,6 +1390,9 @@ onMounted(load);
 .detail-section {
   margin-top: 6px;
 }
+.detail-section + .detail-section {
+  margin-top: 14px;
+}
 .detail-section-title {
   font-size: 12px;
   font-weight: 600;
@@ -1292,6 +1400,18 @@ onMounted(load);
   margin-bottom: 8px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+}
+/* 详情中的"标题"独立展示（区别于弹窗顶部 taskNo + title + status 的紧凑标题区） */
+.detail-title-display {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.65;
+  color: var(--ld-text-primary, rgba(255, 255, 255, 0.92));
+  word-break: break-word;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
 }
 .detail-content {
   font-size: 13px;

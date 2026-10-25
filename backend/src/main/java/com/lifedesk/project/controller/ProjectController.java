@@ -11,6 +11,9 @@ import com.lifedesk.project.service.GitSyncService;
 import com.lifedesk.project.service.ProjectService;
 import com.lifedesk.project.service.RequirementService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -85,6 +88,30 @@ public class ProjectController {
     @GetMapping("/requirements/{sourceId}/detail")
     public R<Map<String, Object>> requirementDetail(@PathVariable String sourceId) {
         return R.ok(requirementService.fetchDetail(sourceId));
+    }
+
+    /**
+     * 图片代理：用 Authorization 头去远程拉取图片字节流，原样透传给前端。
+     *
+     * <p>用途：详情弹窗 content HTML 中的 {@code <img src="...">} 标签，浏览器渲染时无法附加
+     * 自定义 Authorization 头，对需要鉴权的图片资源会收到 401。前端把 img src 改写为
+     * {@code /api/project/requirements/img-proxy?url=<encoded>} 走本端点代理。</p>
+     *
+     * <p>失败返回 404（浏览器 img 标签会展示占位图）。</p>
+     *
+     * @param url 远程图片绝对 URL（必须 http/https 协议）
+     */
+    @GetMapping("/requirements/img-proxy")
+    public ResponseEntity<byte[]> imgProxy(@RequestParam String url) {
+        byte[] data = requirementService.fetchImage(url);
+        if (data == null || data.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(requirementService.guessImageContentType(url)));
+        // 浏览器可缓存 1 小时，减少重复代理请求
+        headers.setCacheControl("public, max-age=3600");
+        return new ResponseEntity<>(data, headers, org.springframework.http.HttpStatus.OK);
     }
 
     /** 新建项目 */
