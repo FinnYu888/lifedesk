@@ -47,10 +47,17 @@ logging:
 # 我的需求：第三方需求平台对接
 # 接口地址 https://wetrans.cimc.cn/gateway/apiIssue/developTask/query（集团内网，外网拦截）
 # 当前部署在外网时调用会失败，自动回退本地 mock 表；后端部署到集团内网后即可拉取真实需求数据
+# sprint/query 和 issue/query 用于里程碑进度统计：
+#   1. sprint/query 拉取所有 sprint（含 id 和 sprintName 如 CDS20261025）
+#   2. issue/query?sprintIds=[id] 拉取该 sprint 下所有 issue，按 status=CLOSED 计算完成率
 requirement:
   remote:
     enabled: true
     url: https://wetrans.cimc.cn/gateway/apiIssue/developTask/query
+    detail-url: https://wetrans.cimc.cn/gateway/apiIssue/developTask/getDetail
+    sprint-query-url: https://wetrans.cimc.cn/gateway/apiIssue/sprint/query
+    issue-query-url: https://wetrans.cimc.cn/gateway/apiIssue/issue/query
+    # 远程接口调用 token（JWT）—— 兜底用，前端可在"我的需求"卡片输入最新 authorization 动态覆盖
     token: eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiIzOCIsInN1YiI6IjE4MDY2MDY1NzAzIiwiaXNzIjoidXNlciIsImlhdCI6MTc5MjkzMTgyMn0.gyr0FLsHUVFX5HSW4NQv5Y-oaUz1fdZzaMGJxt6B1II
     # 入参固定项
     project: CDS

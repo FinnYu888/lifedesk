@@ -118,10 +118,37 @@
             />
           </div>
         </div>
+        <!-- authorization 输入区：wetrans.cimc.cn/gateway/ 接口鉴权每日可能过期 -->
+        <div class="auth-bar">
+          <div class="auth-status" :class="authStatusCls">
+            <span class="auth-dot" />
+            <span class="auth-text">{{ authStatusText }}</span>
+          </div>
+          <el-input
+            v-model="authInput"
+            type="password"
+            show-password
+            placeholder="粘贴最新 authorization（JWT，不带 Bearer 前缀）"
+            size="small"
+            class="auth-input"
+            @keyup.enter="onSaveAuthorization"
+          />
+          <el-button
+            size="small"
+            type="primary"
+            :loading="authSaving"
+            @click="onSaveAuthorization"
+          >保存并刷新</el-button>
+        </div>
         <div class="req-tip text-tertiary">
           来源：wetrans.cimc.cn/gateway/apiIssue/developTask/query（点击行查看详情）
         </div>
+        <!-- 鉴权过期 / 空数据提示 -->
+        <div v-if="!requirements.length && authExpired" class="req-empty-hint">
+          鉴权信息已过期，请输入最新 authorization 后点击「保存并刷新」
+        </div>
         <el-table
+          v-else
           :data="requirements"
           size="small"
           class="req-table"
@@ -168,22 +195,27 @@
         </el-table>
       </div>
 
-      <!-- 里程碑进度（按需求接口 sprint 聚合） -->
+      <!-- 里程碑进度（按需求接口 sprint 聚合 + issue/query status=CLOSED 统计） -->
       <div class="ld-card">
         <div class="card-head">
           <div class="card-title">里程碑进度</div>
           <span class="text-tertiary" style="font-size: 12px">按 Sprint 聚合</span>
         </div>
-        <ProgressBar
-          v-for="m in milestones"
-          :key="m.name"
-          :label="milestoneLabel(m)"
-          :percent="m.progress ?? 0"
-          :color="milestoneColor(m.progress ?? 0)"
-        />
-        <div class="m-note text-tertiary">
-          Sprint 形如 CDS20261025，其中 20261025 即为里程碑日期
+        <div v-if="!milestones.length && authExpired" class="m-empty-hint">
+          鉴权信息已过期，请输入最新 authorization 后点击「保存并刷新」
         </div>
+        <template v-else>
+          <ProgressBar
+            v-for="m in milestones"
+            :key="m.name"
+            :label="milestoneLabel(m)"
+            :percent="m.progress ?? 0"
+            :color="milestoneColor(m.progress ?? 0)"
+          />
+          <div class="m-note text-tertiary">
+            Sprint 形如 CDS20261025，其中 20261025 即为里程碑日期
+          </div>
+        </template>
       </div>
 
       <!-- 最近提交活动（每个项目最后一次提交） -->
@@ -387,9 +419,12 @@ import {
   fetchRequirements,
   fetchRequirementMilestones,
   fetchRequirementDetail,
+  setRequirementAuthorization,
+  getRequirementAuthStatus,
   type Requirement,
   type RequirementMilestone,
-  type RequirementDetail
+  type RequirementDetail,
+  type RequirementAuthStatus
 } from "@/api/requirement";
 
 defineOptions({ name: "ProjectView" });
@@ -404,6 +439,32 @@ const reqSprint = ref<string>("");
 const reqStatus = ref<string>("");
 const reqKeyword = ref<string>("");
 let reqKeywordTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** authorization 状态（前端动态 token + 后端配置兜底 token） */
+const authStatus = ref<RequirementAuthStatus | null>(null);
+const authInput = ref<string>("");
+const authSaving = ref(false);
+/** 鉴权是否已过期（developTask/query 或 sprint/query 返回 401/403 时为 true） */
+const authExpired = ref(false);
+
+/** authorization 状态文案 */
+const authStatusText = computed(() => {
+  if (!authStatus.value || authStatus.value.source === "none") {
+    return "未设置 authorization";
+  }
+  if (authStatus.value.source === "dynamic") {
+    return "已设置动态 authorization（前端输入）";
+  }
+  return "使用配置文件兜底 authorization";
+});
+
+/** authorization 状态样式类 */
+const authStatusCls = computed(() => {
+  if (!authStatus.value || authStatus.value.source === "none") return "auth-none";
+  if (authExpired.value) return "auth-expired";
+  if (authStatus.value.source === "dynamic") return "auth-dynamic";
+  return "auth-fallback";
+});
 
 const dialogVisible = ref(false);
 const submitting = ref(false);
@@ -478,6 +539,13 @@ const passwordPlaceholder = computed(() => {
 });
 
 async function load() {
+  // 先拉取 authorization 状态（用于展示状态 + 判断是否需要提示用户输入）
+  try {
+    const a = await getRequirementAuthStatus();
+    authStatus.value = a.data;
+  } catch {
+    /* 拉取状态失败不阻塞主流程 */
+  }
   try {
     const [s, a, m, c] = await Promise.all([
       fetchProjectStat(),
@@ -487,7 +555,7 @@ async function load() {
     ]);
     stat.value = s.data;
     active.value = a.data;
-    milestones.value = m.data;
+    milestones.value = m.data || [];
     commits.value = c.data;
   } catch {
     /* 拦截器已提示 */
@@ -501,8 +569,42 @@ async function loadRequirements() {
   try {
     const r = await fetchRequirements(reqSprint.value, reqStatus.value, reqKeyword.value);
     requirements.value = r.data || [];
+    // 有数据 → 鉴权未过期；无数据 → 标记为"可能鉴权过期"（让 UI 提示输入）
+    authExpired.value = requirements.value.length === 0
+      && (!authStatus.value || authStatus.value.hasEffectiveToken);
   } catch {
     /* 拦截器已提示 */
+    requirements.value = [];
+    authExpired.value = true;
+  }
+}
+
+/** 保存 authorization 并刷新"我的需求"+"里程碑进度" */
+async function onSaveAuthorization() {
+  const token = authInput.value.trim();
+  if (!token) {
+    ElMessage.warning("请粘贴最新 authorization（JWT）");
+    return;
+  }
+  authSaving.value = true;
+  try {
+    const r = await setRequirementAuthorization(token);
+    authStatus.value = r.data;
+    authExpired.value = false;
+    authInput.value = "";
+    ElMessage.success("authorization 已保存，正在刷新数据");
+    // 重新加载"我的需求" + "里程碑进度"
+    const [req, ms] = await Promise.all([
+      fetchRequirements(reqSprint.value, reqStatus.value, reqKeyword.value),
+      fetchRequirementMilestones()
+    ]);
+    requirements.value = req.data || [];
+    milestones.value = ms.data || [];
+    authExpired.value = requirements.value.length === 0;
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    authSaving.value = false;
   }
 }
 
@@ -1097,6 +1199,110 @@ onMounted(load);
   font-size: 11px;
   margin: 4px 0 10px;
   padding-left: 1px;
+}
+
+/* authorization 输入区：wetrans.cimc.cn/gateway/ 接口鉴权每日可能过期 */
+.auth-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+.auth-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+.auth-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.auth-status.auth-dynamic {
+  background: rgba(45, 212, 191, 0.14);
+  color: #2dd4bf;
+}
+.auth-status.auth-dynamic .auth-dot {
+  background: #2dd4bf;
+  box-shadow: 0 0 6px #2dd4bf;
+}
+.auth-status.auth-fallback {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fbbf24;
+}
+.auth-status.auth-fallback .auth-dot {
+  background: #fbbf24;
+}
+.auth-status.auth-expired {
+  background: rgba(248, 113, 113, 0.16);
+  color: #f87171;
+}
+.auth-status.auth-expired .auth-dot {
+  background: #f87171;
+  animation: auth-pulse 1.4s ease-in-out infinite;
+}
+.auth-status.auth-none {
+  background: rgba(255, 255, 255, 0.06);
+  color: $text-tertiary;
+}
+.auth-status.auth-none .auth-dot {
+  background: $text-tertiary;
+}
+@keyframes auth-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+}
+.auth-input {
+  flex: 1;
+  min-width: 240px;
+}
+/* auth 输入框玻璃风格适配 */
+.auth-input :deep(.el-input__wrapper) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset !important;
+  border-radius: 6px;
+}
+.auth-input :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px rgba(196, 181, 253, 0.35) inset !important;
+}
+.auth-input :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.5) inset,
+    0 0 0 3px rgba(167, 139, 250, 0.12) inset !important;
+}
+.auth-input :deep(.el-input__inner) {
+  color: var(--ld-text-primary, #f5f3ff) !important;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+.auth-input :deep(.el-input__inner::placeholder) {
+  color: var(--ld-text-tertiary, #786f99) !important;
+}
+
+/* 鉴权过期 / 空数据提示（需求列表 + 里程碑进度） */
+.req-empty-hint,
+.m-empty-hint {
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 13px;
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.06);
+  border: 1px dashed rgba(248, 113, 113, 0.3);
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.m-empty-hint {
+  margin: 4px 0;
 }
 /* el-table 在玻璃卡片中：彻底清掉所有白底，背景跟随卡片玻璃质感 */
 .req-table {

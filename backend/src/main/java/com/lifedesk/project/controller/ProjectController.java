@@ -91,6 +91,32 @@ public class ProjectController {
     }
 
     /**
+     * 设置最新 authorization token（用户在"我的需求"卡片输入后调用）。
+     *
+     * <p>{@code wetrans.cimc.cn/gateway/} 开头的接口鉴权信息每日可能过期，
+     * 用户输入最新 token 后，立即对所有 fetch* 方法生效，并触发前端刷新"我的需求"+"里程碑进度"。</p>
+     *
+     * <p>请求体：{@code {"token": "<JWT，不带 Bearer 前缀>"}}，传空则清空动态 token</p>
+     */
+    @PostMapping("/requirements/authorization")
+    public R<Map<String, Object>> setAuthorization(@RequestBody Map<String, String> body) {
+        String token = body == null ? null : body.get("token");
+        requirementService.setAuthorization(token);
+        return R.ok(requirementService.getAuthorizationStatus());
+    }
+
+    /**
+     * 查询当前 authorization 设置状态（不返回 token 本身，避免泄漏）。
+     *
+     * <p>返回：{@code {"hasDynamicToken":bool, "hasFallbackToken":bool, "hasEffectiveToken":bool, "source":"dynamic|fallback|none"}}
+     * 前端用于展示"是否已设置 authorization"以及"是动态设置还是配置文件兜底"。</p>
+     */
+    @GetMapping("/requirements/authorization/status")
+    public R<Map<String, Object>> authorizationStatus() {
+        return R.ok(requirementService.getAuthorizationStatus());
+    }
+
+    /**
      * 图片代理：用 Authorization 头去远程拉取图片字节流，原样透传给前端。
      *
      * <p>用途：详情弹窗 content HTML 中的 {@code <img src="...">} 标签，浏览器渲染时无法附加

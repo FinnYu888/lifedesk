@@ -57,6 +57,18 @@ export interface RequirementDetail {
   [key: string]: any; // 兼容远程返回的其它字段
 }
 
+/** authorization 设置状态（不返回 token 本身，避免泄漏） */
+export interface RequirementAuthStatus {
+  /** 是否已设置动态 token（前端输入的最新 authorization） */
+  hasDynamicToken: boolean;
+  /** 是否有配置文件兜底 token */
+  hasFallbackToken: boolean;
+  /** 当前是否有可用 token（动态或兜底） */
+  hasEffectiveToken: boolean;
+  /** 当前 token 来源：dynamic=前端动态设置 / fallback=配置文件兜底 / none=未设置 */
+  source: "dynamic" | "fallback" | "none";
+}
+
 /**
  * 拉取"我的需求"列表
  * @param sprint  可选 sprint 过滤（如 CDS20261025）
@@ -79,3 +91,15 @@ export const fetchRequirementDetail = (sourceId: string) =>
 /** 拉取里程碑进度（按 sprint 聚合，sprint 后 8 位即里程碑日期） */
 export const fetchRequirementMilestones = () =>
   http.get<any, Result>("/project/milestones");
+
+/** 查询当前 authorization 设置状态（不返回 token 本身，避免泄漏） */
+export const getRequirementAuthStatus = () =>
+  http.get<any, Result>("/project/requirements/authorization/status");
+
+/**
+ * 设置最新 authorization token（用户在"我的需求"卡片输入后调用）。
+ * 设置后立即对所有 fetch* 方法生效，并触发前端刷新"我的需求"+"里程碑进度"。
+ * @param token 最新 JWT（不带 Bearer 前缀）；传空字符串则清空动态 token
+ */
+export const setRequirementAuthorization = (token: string) =>
+  http.post<any, Result>("/project/requirements/authorization", { token });

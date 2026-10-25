@@ -28,10 +28,12 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -90,9 +92,26 @@ public class RequirementService {
     @Value("${requirement.remote.detail-url:https://wetrans.cimc.cn/gateway/apiIssue/developTask/getDetail}")
     private String remoteDetailUrl;
 
-    /** 远程接口调用 token（JWT） */
+    /** sprint 列表接口：POST，返回所有 sprint（id + sprintName 如 CDS20261025） */
+    @Value("${requirement.remote.sprint-query-url:https://wetrans.cimc.cn/gateway/apiIssue/sprint/query}")
+    private String remoteSprintQueryUrl;
+
+    /** issue 列表接口：POST，按 sprintIds 查询，返回该 sprint 下所有 issue（含 status=CLOSED） */
+    @Value("${requirement.remote.issue-query-url:https://wetrans.cimc.cn/gateway/apiIssue/issue/query}")
+    private String remoteIssueQueryUrl;
+
+    /** 远程接口调用 token（JWT）—— 配置文件兜底值 */
     @Value("${requirement.remote.token:}")
     private String remoteToken;
+
+    /**
+     * 前端动态设置的最新 authorization token（线程安全）。
+     *
+     * <p>{@code wetrans.cimc.cn/gateway/} 开头的接口鉴权信息每日可能过期，
+     * 前端在"我的需求"卡片可输入最新 authorization 动态覆盖。
+     * 优先级：currentToken > remoteToken（配置文件兜底）。</p>
+     */
+    private final AtomicReference<String> currentToken = new AtomicReference<>(null);
 
     /** 是否启用远程接口；默认 false，使用本地 mock 表 */
     @Value("${requirement.remote.enabled:false}")
@@ -182,73 +201,226 @@ public class RequirementService {
     }
 
     /**
+     * 获取当前生效的 authorization token（优先 currentToken，其次配置文件 remoteToken）。
+     * 用于所有 wetrans.cimc.cn/gateway/ 接口的 Authorization 请求头。
+     */
+    private String getEffectiveToken() {
+        String t = currentToken.get();
+        if (t != null && !t.isEmpty()) return t;
+        return remoteToken;
+    }
+
+    /**
+     * 前端动态设置最新 authorization（用户在"我的需求"卡片输入后调用）。
+     * 设置后立即对所有 fetch* 方法生效，无需重启服务。
+     *
+     * @param token 最新 JWT（不带 Bearer 前缀）；传 null 或空字符串则清空动态 token
+     */
+    public void setAuthorization(String token) {
+        if (token == null || token.isEmpty()) {
+            currentToken.set(null);
+            log.info("动态 authorization 已清空");
+        } else {
+            currentToken.set(token);
+            log.info("动态 authorization 已更新（长度 {}）", token.length());
+        }
+    }
+
+    /**
+     * 查询当前 authorization 设置状态（不返回 token 本身，避免泄漏）。
+     * 前端用于展示"是否已设置 authorization"以及"是动态设置还是配置文件兜底"。
+     */
+    public Map<String, Object> getAuthorizationStatus() {
+        Map<String, Object> s = new LinkedHashMap<>();
+        String cur = currentToken.get();
+        s.put("hasDynamicToken", cur != null && !cur.isEmpty());
+        s.put("hasFallbackToken", remoteToken != null && !remoteToken.isEmpty());
+        s.put("hasEffectiveToken", getEffectiveToken() != null && !getEffectiveToken().isEmpty());
+        s.put("source", (cur != null && !cur.isEmpty()) ? "dynamic" : (remoteToken != null && !remoteToken.isEmpty() ? "fallback" : "none"));
+        return s;
+    }
+
+    /**
+     * 判断 HTTP 状态码是否为鉴权失败（401/403）。
+     * 用于 fetch* 方法：鉴权失败时返回空列表，不抛异常，前端展示空状态。
+     */
+    private boolean isAuthError(int status) {
+        return status == 401 || status == 403;
+    }
+
+    /**
      * 我的需求列表。
      *
-     * <p>远程启用且调用成功时返回远程数据；远程失败时回退本地 mock 表（保证页面可用）。</p>
+     * <p>远程启用且调用成功时返回远程数据；鉴权失败（401/403）或远程不可达时返回空列表
+     * （由前端展示"鉴权信息已过期，请输入最新 authorization"提示）。</p>
      *
      * @param sprint  可选 sprint 过滤，传 {@code CDS20261025} 只返回该 sprint 下需求
      * @param status  可选任务状态过滤：todo/doing/done/cancel
      * @param keyword 可选，按 task_detail / topic / product / tester 模糊匹配
      */
     public List<Requirement> list(String sprint, String status, String keyword) {
-        if (remoteEnabled && remoteToken != null && !remoteToken.isEmpty()) {
+        String token = getEffectiveToken();
+        if (remoteEnabled && token != null && !token.isEmpty()) {
             try {
                 List<Requirement> remote = fetchFromRemote();
                 if (remote != null && !remote.isEmpty()) {
                     // 远程数据成功拉取后，做内存过滤（远程接口入参不含 sprint/status/keyword 维度）
                     return filterRemote(remote, sprint, status, keyword);
                 }
+                // 鉴权失败/远程返回空：返回空列表（前端展示空状态，不报错）
+                return new ArrayList<>();
+            } catch (AuthExpiredException e) {
+                // 鉴权过期：明确返回空，前端展示"鉴权过期"提示
+                log.warn("我的需求：鉴权信息已过期，返回空列表");
+                return new ArrayList<>();
             } catch (Exception e) {
-                log.warn("调用远程需求接口失败，回退本地 mock：{}", e.getMessage());
+                log.warn("调用远程需求接口失败，返回空列表：{}", e.getMessage());
+                return new ArrayList<>();
             }
         }
-        // 本地 mock 查询
-        return queryLocal(sprint, status, keyword);
+        // 未配置 token：返回空列表，前端展示"请输入 authorization"
+        if (!remoteEnabled) {
+            return queryLocal(sprint, status, keyword);
+        }
+        return new ArrayList<>();
     }
 
     /**
-     * 里程碑进度：按 sprint 聚合。
+     * 自定义异常：鉴权信息过期（401/403）。
+     * 用于在 fetch* 方法中明确区分"鉴权失败"与"网络/远程异常"，
+     * 让 list/listMilestones 能在鉴权失败时返回空列表（而不是回退本地 mock）。
+     */
+    public static class AuthExpiredException extends RuntimeException {
+        public AuthExpiredException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * 里程碑进度：按 sprint 聚合（依据 issue/query 接口的 status=CLOSED 统计）。
      *
-     * <p>每个 sprint 返回一个 {@link Milestone}，其中：
-     * <ul>
-     *   <li>name：sprint 编号（如 CDS20261025）</li>
-     *   <li>dueDate：从 sprint 末尾 8 位解析得到的里程碑日期</li>
-     *   <li>progress：完成率 = done / (done + doing + todo) * 100，cancel 不计入</li>
-     *   <li>note：附带 "{done}/{total} 任务完成" 文案</li>
-     * </ul>
+     * <p>计算流程：
+     * <ol>
+     *   <li>调用 sprint/query 拿到所有 sprint 列表（id + sprintName 如 CDS20261025）</li>
+     *   <li>调用 developTask/query 拿到当前用户的需求，提取唯一 sprint 列表</li>
+     *   <li>对每个唯一 sprint，在 sprint/query 返回中匹配 sprintName，拿到 sprint id</li>
+     *   <li>用 sprint id 调用 issue/query?sprintIds=[id]，拿到该 sprint 下所有 issue</li>
+     *   <li>按 status=CLOSED 计算完成率 = 完成 / 总数 * 100</li>
+     * </ol>
      * </p>
+     *
+     * <p>鉴权失败（401/403）或远程不可达时返回空列表，前端展示空状态而非接口报错。</p>
      */
     public List<Milestone> listMilestones() {
-        // 里程碑聚合优先用远程数据（如可用），否则本地
-        List<Requirement> all;
-        if (remoteEnabled && remoteToken != null && !remoteToken.isEmpty()) {
-            List<Requirement> remote = null;
-            try {
-                remote = fetchFromRemote();
-            } catch (Exception e) {
-                log.warn("里程碑聚合：远程拉取失败，回退本地：{}", e.getMessage());
+        String token = getEffectiveToken();
+        if (!remoteEnabled || token == null || token.isEmpty()) {
+            if (!remoteEnabled) {
+                return buildMilestonesFromLocal();
             }
-            all = (remote != null && !remote.isEmpty()) ? remote : queryLocal(null, null, null);
-        } else {
-            all = queryLocal(null, null, null);
+            return new ArrayList<>();
         }
 
-        // 内存按 sprint 分组聚合
-        // 注意：无论数据来自远程还是本地，taskStatus 都已是本地值（远程数据在 mapRemoteItem 中已 mapStatus 过）
-        Map<String, long[]> agg = new LinkedHashMap<>(); // sprint → [total, done, doing, todo]
+        // 1) 拉取当前用户的需求列表，提取唯一 sprint 列表
+        List<Requirement> userReqs;
+        try {
+            userReqs = fetchFromRemote();
+            if (userReqs == null || userReqs.isEmpty()) {
+                // 远程返回空（含鉴权失败）：返回空里程碑列表
+                return new ArrayList<>();
+            }
+        } catch (AuthExpiredException e) {
+            log.warn("里程碑：鉴权信息已过期，返回空列表");
+            return new ArrayList<>();
+        } catch (Exception e) {
+            log.warn("里程碑：拉取用户需求失败，返回空列表：{}", e.getMessage());
+            return new ArrayList<>();
+        }
+
+        // 提取唯一 sprint 列表（保持顺序）
+        List<String> uniqueSprints = new ArrayList<>();
+        for (Requirement r : userReqs) {
+            String sp = r.getSprint();
+            if (sp != null && !sp.isEmpty() && !uniqueSprints.contains(sp)) {
+                uniqueSprints.add(sp);
+            }
+        }
+        if (uniqueSprints.isEmpty()) return new ArrayList<>();
+
+        // 2) 拉取所有 sprint 列表，构造 sprintName → sprintId 映射
+        Map<String, String> sprintNameToId = new HashMap<>();
+        try {
+            List<SprintInfo> allSprints = fetchSprints();
+            if (allSprints != null) {
+                for (SprintInfo s : allSprints) {
+                    if (s.name != null && s.id != null) {
+                        sprintNameToId.put(s.name, s.id);
+                    }
+                }
+            }
+        } catch (AuthExpiredException e) {
+            log.warn("里程碑：sprint/query 鉴权失败，返回空列表");
+            return new ArrayList<>();
+        } catch (Exception e) {
+            log.warn("里程碑：sprint/query 调用失败，返回空列表：{}", e.getMessage());
+            return new ArrayList<>();
+        }
+
+        // 3) 对每个唯一 sprint，调用 issue/query 拿到该 sprint 下所有 issue，按 status=CLOSED 聚合
+        List<Milestone> result = new ArrayList<>();
+        for (String sprintName : uniqueSprints) {
+            String sprintId = sprintNameToId.get(sprintName);
+            if (sprintId == null) {
+                // sprint 在 sprint/query 中找不到，跳过（不影响其他 sprint）
+                log.debug("里程碑：sprint {} 在 sprint/query 返回中未匹配到 id，跳过", sprintName);
+                continue;
+            }
+            try {
+                List<IssueInfo> issues = fetchIssues(sprintId);
+                int total = issues == null ? 0 : issues.size();
+                int closed = 0;
+                int open = 0;
+                if (issues != null) {
+                    for (IssueInfo i : issues) {
+                        if ("CLOSED".equalsIgnoreCase(i.status)) closed++;
+                        else open++;
+                    }
+                }
+                int progress = total > 0 ? (int) (closed * 100 / total) : 0;
+                Milestone m = new Milestone();
+                m.setName(sprintName);
+                m.setProgress(progress);
+                m.setNote(String.format("%d/%d 完成（未关闭 %d）", closed, total, open));
+                m.setDueDate(parseSprintDate(sprintName));
+                result.add(m);
+            } catch (AuthExpiredException e) {
+                log.warn("里程碑：issue/query?sprintIds={} 鉴权失败，跳过该 sprint", sprintId);
+                continue;
+            } catch (Exception e) {
+                log.warn("里程碑：issue/query?sprintIds={} 调用失败，跳过：{}", sprintId, e.getMessage());
+                continue;
+            }
+        }
+
+        // 按 sprint 倒序（CDS20261025 在最前）
+        result.sort((a, b) -> b.getName().compareTo(a.getName()));
+        return result;
+    }
+
+    /** 本地 mock 数据聚合里程碑（仅当 remoteEnabled=false 时使用） */
+    private List<Milestone> buildMilestonesFromLocal() {
+        List<Requirement> all = queryLocal(null, null, null);
+        Map<String, long[]> agg = new LinkedHashMap<>();
         for (Requirement r : all) {
             String sp = r.getSprint();
             if (sp == null || sp.isEmpty()) continue;
             String localStatus = r.getTaskStatus();
             if (localStatus == null || "cancel".equals(localStatus)) continue;
             long[] arr = agg.computeIfAbsent(sp, k -> new long[4]);
-            arr[0]++; // total
+            arr[0]++;
             if ("done".equals(localStatus)) arr[1]++;
             else if ("doing".equals(localStatus)) arr[2]++;
             else if ("todo".equals(localStatus)) arr[3]++;
-            // 其它状态不计入分子但计入分母
         }
-
         List<Milestone> result = new ArrayList<>();
         for (Map.Entry<String, long[]> e : agg.entrySet()) {
             String sprint = e.getKey();
@@ -258,13 +430,221 @@ public class RequirementService {
             Milestone m = new Milestone();
             m.setName(sprint);
             m.setProgress(progress);
-            m.setNote(String.format("%d/%d 任务完成（进行中 %d，待办 %d）", done, total, doing, todo));
+            m.setNote(String.format("%d/%d 完成（进行中 %d，待办 %d）", done, total, doing, todo));
             m.setDueDate(parseSprintDate(sprint));
             result.add(m);
         }
-        // 按 sprint 倒序（CDS20261025 在最前）
         result.sort((a, b) -> b.getName().compareTo(a.getName()));
         return result;
+    }
+
+    /** sprint/query 返回的单个 sprint 简化结构（id + sprintName） */
+    private static class SprintInfo {
+        String id;
+        String name;
+        SprintInfo(String id, String name) { this.id = id; this.name = name; }
+    }
+
+    /** issue/query 返回的单个 issue 简化结构（仅保留 status 用于聚合） */
+    private static class IssueInfo {
+        String status;
+        IssueInfo(String status) { this.status = status; }
+    }
+
+    /**
+     * 调用 sprint/query 接口拿取所有 sprint 列表。
+     *
+     * <p>POST 入参：{@code {"statusList":[], "current":1, "pageSize":1000}}
+     * 返回结构兼容：{@code {code, data:{list|records|rows:[{id, sprintName, ...}]}}}</p>
+     *
+     * @throws AuthExpiredException 鉴权失败（401/403）
+     */
+    private List<SprintInfo> fetchSprints() {
+        HttpURLConnection conn = null;
+        String token = getEffectiveToken();
+        try {
+            // 构造入参
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("statusList", new ArrayList<>());
+            payload.put("current", 1);
+            payload.put("pageSize", 1000);
+            String bodyJson = objectMapper.writeValueAsString(payload);
+
+            URL url = new URL(remoteSprintQueryUrl);
+            conn = (HttpURLConnection) url.openConnection();
+            if (conn instanceof HttpsURLConnection) {
+                HttpsURLConnection https = (HttpsURLConnection) conn;
+                https.setSSLSocketFactory(SSL_TRUST_ALL_FACTORY);
+                https.setHostnameVerifier((hostname, session) -> true);
+            }
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setRequestProperty("Authorization", token);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("Connection", "close");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setDoOutput(true);
+            conn.setInstanceFollowRedirects(false);
+
+            byte[] bodyBytes = bodyJson.getBytes(StandardCharsets.UTF_8);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(bodyBytes);
+                os.flush();
+            }
+
+            int status = conn.getResponseCode();
+            if (isAuthError(status)) {
+                throw new AuthExpiredException("sprint/query 鉴权失败 status=" + status);
+            }
+            if (status != 200) {
+                String errBody = readErrorStream(conn);
+                log.warn("sprint/query 异常状态：status={}, errBody={}", status,
+                        errBody == null ? "(无)" : (errBody.length() > 300 ? errBody.substring(0, 300) + "..." : errBody));
+                return null;
+            }
+
+            String body = readStream(conn);
+            log.debug("sprint/query 响应：bodyLen={}", body.length());
+
+            return parseSprints(body);
+        } catch (AuthExpiredException e) {
+            throw e;
+        } catch (java.net.UnknownHostException | java.net.ConnectException e) {
+            log.warn("sprint/query 不可达（网络/代理拦截）：{}", e.getMessage());
+            return null;
+        } catch (Exception e) {
+            log.warn("sprint/query 调用异常：{} {}", e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /** 解析 sprint/query 返回 JSON 为 SprintInfo 列表 */
+    @SuppressWarnings("unchecked")
+    private List<SprintInfo> parseSprints(String body) {
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode data = root.get("data");
+            if (data == null) return null;
+            JsonNode list;
+            if (data.isArray()) list = data;
+            else if (data.has("list") && data.get("list").isArray()) list = data.get("list");
+            else if (data.has("records") && data.get("records").isArray()) list = data.get("records");
+            else if (data.has("rows") && data.get("rows").isArray()) list = data.get("rows");
+            else return null;
+
+            List<SprintInfo> result = new ArrayList<>();
+            for (JsonNode item : list) {
+                String id = firstNonBlank(item, "id", "sprintId", "_id");
+                String name = firstNonBlank(item, "sprintName", "name", "sprintCode", "code", "title");
+                if (id != null && name != null) {
+                    result.add(new SprintInfo(id, name));
+                }
+            }
+            log.info("sprint/query 拉取成功：共 {} 条 sprint", result.size());
+            return result;
+        } catch (Exception e) {
+            log.warn("sprint/query JSON 解析失败：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 调用 issue/query 接口拿取指定 sprint 下所有 issue 列表。
+     *
+     * <p>POST 入参：{@code {"current":1, "pageSize":20, "sprintIds":["<sprintId>"]}}
+     * 返回结构兼容：{@code {code, data:{list|records|rows:[{status, ...}]}}}</p>
+     *
+     * @throws AuthExpiredException 鉴权失败（401/403）
+     */
+    private List<IssueInfo> fetchIssues(String sprintId) {
+        HttpURLConnection conn = null;
+        String token = getEffectiveToken();
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("current", 1);
+            payload.put("pageSize", 1000); // 取该 sprint 下所有 issue
+            payload.put("sprintIds", Collections.singletonList(sprintId));
+            String bodyJson = objectMapper.writeValueAsString(payload);
+
+            URL url = new URL(remoteIssueQueryUrl);
+            conn = (HttpURLConnection) url.openConnection();
+            if (conn instanceof HttpsURLConnection) {
+                HttpsURLConnection https = (HttpsURLConnection) conn;
+                https.setSSLSocketFactory(SSL_TRUST_ALL_FACTORY);
+                https.setHostnameVerifier((hostname, session) -> true);
+            }
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setRequestProperty("Authorization", token);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("Connection", "close");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setDoOutput(true);
+            conn.setInstanceFollowRedirects(false);
+
+            byte[] bodyBytes = bodyJson.getBytes(StandardCharsets.UTF_8);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(bodyBytes);
+                os.flush();
+            }
+
+            int status = conn.getResponseCode();
+            if (isAuthError(status)) {
+                throw new AuthExpiredException("issue/query?sprintIds=" + sprintId + " 鉴权失败 status=" + status);
+            }
+            if (status != 200) {
+                String errBody = readErrorStream(conn);
+                log.warn("issue/query 异常状态：sprintId={}, status={}, errBody={}", sprintId, status,
+                        errBody == null ? "(无)" : (errBody.length() > 300 ? errBody.substring(0, 300) + "..." : errBody));
+                return null;
+            }
+
+            String body = readStream(conn);
+            log.debug("issue/query 响应：sprintId={}, bodyLen={}", sprintId, body.length());
+
+            return parseIssues(body);
+        } catch (AuthExpiredException e) {
+            throw e;
+        } catch (java.net.UnknownHostException | java.net.ConnectException e) {
+            log.warn("issue/query 不可达：sprintId={}, {}", sprintId, e.getMessage());
+            return null;
+        } catch (Exception e) {
+            log.warn("issue/query 调用异常：sprintId={}, {} {}", sprintId, e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /** 解析 issue/query 返回 JSON 为 IssueInfo 列表 */
+    @SuppressWarnings("unchecked")
+    private List<IssueInfo> parseIssues(String body) {
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode data = root.get("data");
+            if (data == null) return null;
+            JsonNode list;
+            if (data.isArray()) list = data;
+            else if (data.has("list") && data.get("list").isArray()) list = data.get("list");
+            else if (data.has("records") && data.get("records").isArray()) list = data.get("records");
+            else if (data.has("rows") && data.get("rows").isArray()) list = data.get("rows");
+            else return null;
+
+            List<IssueInfo> result = new ArrayList<>();
+            for (JsonNode item : list) {
+                String status = firstNonBlank(item, "status", "issueStatus", "state", "issue_status");
+                result.add(new IssueInfo(status));
+            }
+            log.info("issue/query 拉取成功：共 {} 条 issue", result.size());
+            return result;
+        } catch (Exception e) {
+            log.warn("issue/query JSON 解析失败：{}", e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -288,6 +668,7 @@ public class RequirementService {
      */
     private List<Requirement> fetchFromRemote() {
         HttpURLConnection conn = null;
+        String token = getEffectiveToken();
         try {
             // 构造入参 JSON
             Map<String, Object> payload = buildRemotePayload();
@@ -305,8 +686,8 @@ public class RequirementService {
 
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-            // 关键：直接 Authorization: <token>，不加 Bearer 前缀
-            conn.setRequestProperty("Authorization", remoteToken);
+            // 关键：直接 Authorization: <token>，不加 Bearer 前缀（优先动态 token，兜底配置 token）
+            conn.setRequestProperty("Authorization", token);
             conn.setRequestProperty("Accept", "application/json");
             // 关闭 keep-alive（避免连接复用导致的 SSL 状态泄漏）
             conn.setRequestProperty("Connection", "close");
@@ -322,6 +703,10 @@ public class RequirementService {
             }
 
             int status = conn.getResponseCode();
+            // 鉴权失败：明确抛 AuthExpiredException，让调用方返回空列表
+            if (isAuthError(status)) {
+                throw new AuthExpiredException("developTask/query 鉴权失败 status=" + status);
+            }
             if (status != 200) {
                 // 读取错误响应体（如 4xx/5xx 时 getInputStream 抛异常，需用 getErrorStream）
                 String errBody = readErrorStream(conn);
@@ -335,8 +720,11 @@ public class RequirementService {
                     body.length() > 500 ? body.substring(0, 500) : body);
 
             return parseRemoteResponse(body);
+        } catch (AuthExpiredException e) {
+            // 鉴权失败：向上抛，让调用方（list / listMilestones）返回空列表，前端展示"鉴权过期"提示
+            throw e;
         } catch (java.net.UnknownHostException | java.net.ConnectException e) {
-            log.warn("远程需求接口不可达（网络/代理拦截，回退本地 mock）：{}", e.getMessage());
+            log.warn("远程需求接口不可达（网络/代理拦截，返回空列表）：{}", e.getMessage());
             return null;
         } catch (Exception e) {
             log.warn("远程需求接口调用异常：{} {}", e.getClass().getSimpleName(), e.getMessage());
@@ -419,7 +807,7 @@ public class RequirementService {
 
             conn.setRequestMethod("GET");
             // 鉴权头与 query / getDetail 接口一致：直接 Authorization: <token>
-            conn.setRequestProperty("Authorization", remoteToken);
+            conn.setRequestProperty("Authorization", getEffectiveToken());
             conn.setRequestProperty("Accept", "image/*, */*");
             conn.setRequestProperty("Connection", "close");
             conn.setConnectTimeout(15000);
@@ -663,7 +1051,7 @@ public class RequirementService {
 
             conn.setRequestMethod("GET");
             // 鉴权头与 query 接口一致：直接 Authorization: <token>
-            conn.setRequestProperty("Authorization", remoteToken);
+            conn.setRequestProperty("Authorization", getEffectiveToken());
             conn.setRequestProperty("Accept", "application/json");
             conn.setRequestProperty("Connection", "close");
             conn.setConnectTimeout(15000);
