@@ -211,6 +211,8 @@
       :title="form.id ? '编辑项目' : '新建项目'"
       width="520px"
       :close-on-click-modal="false"
+      class="ld-dialog"
+      modal-class="ld-overlay"
     >
       <el-form label-width="96px" label-position="left">
         <el-form-item label="项目名" required>
@@ -263,7 +265,8 @@
       title="需求详情"
       width="760px"
       :close-on-click-modal="true"
-      class="req-detail-dialog"
+      class="ld-dialog"
+      modal-class="ld-overlay"
     >
       <div v-loading="detailDialog.loading" class="req-detail-body">
         <template v-if="detailDialog.data">
@@ -1305,34 +1308,142 @@ onMounted(load);
   color: $text-tertiary;
 }
 
-/* ========== 需求详情弹窗（玻璃风格） ========== */
-/* el-dialog 容器：透明化背景，跟随页面玻璃质感 */
-.req-detail-dialog :deep(.el-dialog) {
-  background: rgba(28, 28, 36, 0.78) !important;
+/* ========== 工程统一弹窗玻璃风格 ==========
+ * 与 .ld-card 一致的玻璃质感：
+ *   - background: $bg-card (rgba(255,255,255,0.05))
+ *   - border: 1px solid $border-glass (rgba(255,255,255,0.12))
+ *   - border-radius: $radius-card (18px)
+ *   - box-shadow: $shadow-glass (0 8px 32px ... + inset 0 1px 0 ...)
+ *   - backdrop-filter: blur(20px) saturate(180%)
+ * 用于所有 el-dialog（新建/编辑项目 + 需求详情），保持工程风格一致。
+ */
+/* el-overlay 遮罩：与 bookmark .modal-overlay 一致的黑底 + 轻模糊
+ * modal-class 是 el-dialog 提供的属性，会附加到 .el-overlay 上（无需 :has 兼容性顾虑） */
+:global(.ld-overlay) {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* 弹窗容器：玻璃质感（与 .ld-card 一致） */
+.ld-dialog :deep(.el-dialog) {
+  background: rgba(255, 255, 255, 0.05) !important;
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   overflow: hidden;
 }
-.req-detail-dialog :deep(.el-dialog__header) {
-  padding: 14px 20px;
+/* 弹窗标题栏 */
+.ld-dialog :deep(.el-dialog__header) {
+  padding: 16px 22px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   margin-right: 0;
+  background: rgba(255, 255, 255, 0.02);
 }
-.req-detail-dialog :deep(.el-dialog__title) {
+.ld-dialog :deep(.el-dialog__title) {
   font-size: 15px;
   font-weight: 600;
-  color: var(--ld-text-primary, rgba(255, 255, 255, 0.92));
+  color: var(--ld-text-primary, #f5f3ff);
+  letter-spacing: 0.3px;
 }
-.req-detail-dialog :deep(.el-dialog__headerbtn .el-dialog__close) {
-  color: var(--ld-text-secondary, rgba(255, 255, 255, 0.65));
+.ld-dialog :deep(.el-dialog__headerbtn .el-dialog__close) {
+  color: var(--ld-text-secondary, #b8b0d4);
+  font-size: 18px;
+  transition: color 0.2s;
 }
-.req-detail-dialog :deep(.el-dialog__body) {
-  padding: 18px 22px 22px;
-  color: var(--ld-text-primary, rgba(255, 255, 255, 0.92));
+.ld-dialog :deep(.el-dialog__headerbtn:hover .el-dialog__close) {
+  color: var(--ld-text-primary, #f5f3ff);
 }
+/* 弹窗主体 */
+.ld-dialog :deep(.el-dialog__body) {
+  padding: 20px 22px 24px;
+  color: var(--ld-text-primary, #f5f3ff);
+}
+/* 弹窗底部（按钮区） */
+.ld-dialog :deep(.el-dialog__footer) {
+  padding: 12px 22px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+/* 弹窗内的 el-form 元素玻璃风格适配 */
+.ld-dialog :deep(.el-form-item__label) {
+  color: var(--ld-text-secondary, #b8b0d4);
+  font-size: 13px;
+}
+.ld-dialog :deep(.el-input__wrapper),
+.ld-dialog :deep(.el-textarea__inner) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset !important;
+  border-radius: 8px;
+  transition: box-shadow 0.2s;
+}
+.ld-dialog :deep(.el-input__wrapper:hover),
+.ld-dialog :deep(.el-textarea__inner:hover) {
+  box-shadow: 0 0 0 1px rgba(196, 181, 253, 0.35) inset !important;
+}
+.ld-dialog :deep(.el-input__wrapper.is-focus),
+.ld-dialog :deep(.el-textarea__inner:focus) {
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.5) inset,
+    0 0 0 3px rgba(167, 139, 250, 0.12) inset !important;
+}
+.ld-dialog :deep(.el-input__inner),
+.ld-dialog :deep(.el-textarea__inner) {
+  color: var(--ld-text-primary, #f5f3ff) !important;
+}
+.ld-dialog :deep(.el-input__inner::placeholder),
+.ld-dialog :deep(.el-textarea__inner::placeholder) {
+  color: var(--ld-text-tertiary, #786f99) !important;
+}
+/* el-divider 在弹窗中也要玻璃风格 */
+.ld-dialog :deep(.el-divider) {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+.ld-dialog :deep(.el-divider__text) {
+  background: transparent;
+  color: var(--ld-text-tertiary, #786f99);
+  font-size: 12px;
+  padding: 0 10px;
+}
+/* el-radio-button 玻璃风格适配 */
+.ld-dialog :deep(.el-radio-button__inner) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: var(--ld-text-secondary, #b8b0d4) !important;
+}
+.ld-dialog :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  background: rgba(167, 139, 250, 0.18) !important;
+  border-color: rgba(167, 139, 250, 0.5) !important;
+  color: #c4b5fd !important;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.35) inset !important;
+}
+/* el-button 主按钮微紫色光感 */
+.ld-dialog :deep(.el-button--primary) {
+  background: rgba(167, 139, 250, 0.22) !important;
+  border-color: rgba(167, 139, 250, 0.5) !important;
+  color: #f5f3ff !important;
+}
+.ld-dialog :deep(.el-button--primary:hover) {
+  background: rgba(167, 139, 250, 0.32) !important;
+  border-color: rgba(196, 181, 253, 0.65) !important;
+}
+.ld-dialog :deep(.el-button--default) {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: var(--ld-text-secondary, #b8b0d4) !important;
+}
+.ld-dialog :deep(.el-button--default:hover) {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: var(--ld-text-primary, #f5f3ff) !important;
+}
+/* loading 蒙层透明，跟随弹窗背景 */
+.ld-dialog :deep(.el-loading-mask) {
+  background: transparent;
+}
+
+/* ========== 需求详情弹窗内容样式（沿用 ld-dialog 容器，仅定义内容布局） ========== */
 .req-detail-body {
   min-height: 200px;
 }
@@ -1454,9 +1565,5 @@ onMounted(load);
   font-size: 13px;
   text-align: center;
   padding: 32px 0;
-}
-/* 弹窗 loading 容器透明背景 */
-.req-detail-dialog :deep(.el-loading-mask) {
-  background: transparent;
 }
 </style>
