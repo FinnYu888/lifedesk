@@ -88,8 +88,8 @@ const perfOption = computed(() => {
         type: "line",
         smooth: true,
         data: perf.value.map(p => p.memory),
-        lineStyle: { color: "#7c3aed", width: 2 },
-        itemStyle: { color: "#7c3aed" }
+        lineStyle: { color: "#a78bfa", width: 2 },
+        itemStyle: { color: "#a78bfa" }
       },
       {
         name: "延迟",

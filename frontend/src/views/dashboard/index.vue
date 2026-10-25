@@ -67,7 +67,7 @@
 
         <div class="ld-card">
           <div class="hc-title">运动计划达成率</div>
-          <ProgressBar label="力量训练" :percent="84" color="#7c3aed" />
+          <ProgressBar label="力量训练" :percent="84" color="#a78bfa" />
           <ProgressBar label="有氧" :percent="65" color="#a78bfa" />
           <ProgressBar label="柔韧" :percent="40" color="#fbbf24" />
           <ProgressBar label="拉伸放松" :percent="90" color="#2dd4bf" />
@@ -127,6 +127,8 @@ const modules = computed(() => {
       { path: "/monitor", label: "系统监控", value: 0, note: "", noteCls: "" },
       { path: "/schedule", label: "日程会议", value: 0, note: "", noteCls: "" },
       { path: "/skill", label: "Skills 工坊", value: 0, note: "", noteCls: "" },
+      { path: "/bookmark", label: "收藏与笔记", value: 0, note: "0 收藏 · 0 笔记", noteCls: "" },
+      { path: "/english", label: "英语提升", value: "0%", note: "今日 0/0 已完成", noteCls: "" },
       { path: "/health", label: "个人健康", value: "82%", note: "周达成率 ↑", noteCls: "text-positive" }
     ];
   }
@@ -137,6 +139,8 @@ const modules = computed(() => {
     { path: "/monitor", label: "系统监控", value: mk("monitor").count ?? 0, note: mk("monitor").note ?? "", noteCls: "text-warning" },
     { path: "/schedule", label: "日程会议", value: mk("schedule").count ?? 0, note: mk("schedule").note ?? "", noteCls: "" },
     { path: "/skill", label: "Skills 工坊", value: mk("skill").count ?? 0, note: mk("skill").note ?? "", noteCls: "" },
+    { path: "/bookmark", label: "收藏与笔记", value: mk("favorite").count ?? 0, note: mk("favorite").note ?? "0 收藏 · 0 笔记", noteCls: "" },
+    { path: "/english", label: "英语提升", value: mk("english").count ?? "0%", note: mk("english").note ?? "今日 0/0 已完成", noteCls: "text-positive" },
     { path: "/health", label: "个人健康", value: "82%", note: "周达成率 ↑", noteCls: "text-positive" }
   ];
 });
@@ -186,7 +190,7 @@ const weightChartOption = computed(() => ({
       smooth: true,
       symbol: "circle",
       symbolSize: 6,
-      lineStyle: { color: "#7c3aed", width: 2 },
+      lineStyle: { color: "#a78bfa", width: 2 },
       itemStyle: { color: "#a78bfa" }
     }
   ]
@@ -214,7 +218,7 @@ onMounted(loadAll);
 
 .module-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 14px;
   margin-bottom: 22px;
 }
@@ -302,14 +306,14 @@ onMounted(loadAll);
   flex: 1;
   text-align: center;
   padding: 6px 0;
-  background: rgba(124, 58, 237, 0.08);
+  background: rgba(167, 139, 250, 0.08);
   border-radius: 8px;
   font-size: 13px;
   color: $text-secondary;
   cursor: pointer;
   transition: all 0.15s;
   &:hover {
-    background: rgba(124, 58, 237, 0.2);
+    background: rgba(167, 139, 250, 0.2);
     color: $text-primary;
   }
 }

@@ -1,6 +1,6 @@
 <template>
   <div class="layout">
-    <!-- 左侧固定侧边栏 -->
+    <!-- 左侧固定侧边栏（液态玻璃） -->
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-logo">L</div>
@@ -19,14 +19,6 @@
           <el-icon><component :is="item.icon" /></el-icon>
           <span>{{ item.label }}</span>
         </router-link>
-      </nav>
-
-      <nav class="nav-group">
-        <div class="nav-title">快捷操作</div>
-        <a class="nav-item" @click="onQuick">
-          <el-icon><Plus /></el-icon>
-          <span>{{ quickLabel }}</span>
-        </a>
       </nav>
 
       <!-- 今日健康迷你卡 -->
@@ -64,7 +56,6 @@
         <el-badge :value="3" class="bell">
           <el-icon :size="20"><Bell /></el-icon>
         </el-badge>
-        <el-button type="primary" :icon="Plus" @click="onQuick">{{ quickLabel }}</el-button>
       </header>
 
       <main class="content">
@@ -78,7 +69,6 @@
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 import {
-  Plus,
   Search,
   Bell,
   HomeFilled,
@@ -87,6 +77,8 @@ import {
   Calendar,
   Monitor,
   Trophy,
+  Collection,
+  Reading,
   Sunny
 } from "@element-plus/icons-vue";
 
@@ -102,25 +94,10 @@ const navItems = [
   { path: "/schedule", label: "日程会议", icon: Calendar },
   { path: "/monitor", label: "系统监控", icon: Monitor },
   { path: "/skill", label: "Skills 工坊", icon: Trophy },
+  { path: "/bookmark", label: "收藏与笔记", icon: Collection },
+  { path: "/english", label: "英语提升", icon: Reading },
   { path: "/health", label: "个人健康", icon: Sunny }
 ];
-
-const quickLabel = computed(() => {
-  const map: Record<string, string> = {
-    Dashboard: "新增记录",
-    Project: "新建项目",
-    Task: "新建任务",
-    Schedule: "新建会议",
-    Monitor: "配置监控",
-    Skill: "添加技能",
-    Health: "记录健康"
-  };
-  return map[route.name as string] || "+ 新建";
-});
-
-function onQuick() {
-  // 简单提示，实际可弹窗
-}
 </script>
 
 <style scoped lang="scss">
@@ -130,11 +107,14 @@ function onQuick() {
   overflow: hidden;
 }
 
+// 侧栏：半透明深紫 + 玻璃模糊，让右侧页面渐变光斑透过
 .sidebar {
   width: 240px;
   flex-shrink: 0;
   background: $bg-sidebar;
-  border-right: 1px solid $border-subtle;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-right: 1px solid $border-glass;
   display: flex;
   flex-direction: column;
   padding: 18px 0;
@@ -156,6 +136,7 @@ function onQuick() {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 14px rgba(167, 139, 250, 0.35);
 }
 .brand-name {
   font-size: 18px;
@@ -165,6 +146,8 @@ function onQuick() {
 
 .nav-group {
   padding: 8px 12px;
+  flex: 1;
+  overflow-y: auto;
 }
 .nav-title {
   padding: 8px 12px 4px;
@@ -184,13 +167,13 @@ function onQuick() {
   text-decoration: none;
   transition: all 0.15s;
   margin-bottom: 2px;
-}
-.nav-item:hover {
-  background: rgba(124, 58, 237, 0.1);
-  color: $text-primary;
+  &:hover {
+    background: rgba(167, 139, 250, 0.08);
+    color: $text-primary;
+  }
 }
 .nav-item-active {
-  background: rgba(124, 58, 237, 0.18);
+  background: rgba(167, 139, 250, 0.16);
   color: $accent-light;
   border: 1px solid $border-accent;
 }
@@ -198,9 +181,11 @@ function onQuick() {
 .health-mini {
   margin: 6px 14px;
   padding: 12px 14px;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1px solid $border-subtle;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid $border-glass;
   border-radius: $radius-sm;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 .mini-title {
   font-size: 11px;
@@ -222,7 +207,7 @@ function onQuick() {
   align-items: center;
   gap: 10px;
   padding: 14px 22px 6px;
-  border-top: 1px solid $border-subtle;
+  border-top: 1px solid $border-glass;
 }
 .avatar {
   width: 32px;
@@ -235,6 +220,7 @@ function onQuick() {
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 14px rgba(167, 139, 250, 0.3);
 }
 .nickname {
   font-size: 14px;
@@ -247,13 +233,17 @@ function onQuick() {
   flex-direction: column;
   overflow: hidden;
 }
+// 顶栏：玻璃风格（让 content 的渐变光斑透过顶栏）
 .topbar {
   height: 60px;
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 22px;
-  border-bottom: 1px solid $border-subtle;
+  background: rgba(11, 8, 23, 0.55);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid $border-glass;
 }
 .page-title {
   font-size: 17px;
@@ -274,6 +264,5 @@ function onQuick() {
   flex: 1;
   overflow-y: auto;
   padding: 22px;
-  background: $bg-page;
 }
 </style>

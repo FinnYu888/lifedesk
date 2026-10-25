@@ -1,5 +1,7 @@
 package com.lifedesk.dashboard.service;
 
+import com.lifedesk.english.service.EnglishTaskService;
+import com.lifedesk.favorite.service.FavoriteService;
 import com.lifedesk.health.service.HealthService;
 import com.lifedesk.monitor.service.MonitorService;
 import com.lifedesk.project.service.ProjectService;
@@ -33,6 +35,8 @@ public class DashboardService {
     private final MonitorService monitorService;
     private final SkillService skillService;
     private final HealthService healthService;
+    private final FavoriteService favoriteService;
+    private final EnglishTaskService englishTaskService;
 
     /** 问候区 + 今日摘要 */
     public Map<String, Object> greeting() {
@@ -100,6 +104,21 @@ public class DashboardService {
         health.put("count", "82%");
         health.put("note", "周达成率 ↑");
         stat.put("health", health);
+
+        Map<String, Object> favorite = new HashMap<>();
+        Map<String, Object> favStat = favoriteService.getStat();
+        long favTotal = ((Number) favStat.getOrDefault("total", 0)).longValue();
+        long linkCount = ((Number) favStat.getOrDefault("links", 0)).longValue();
+        long noteCount = ((Number) favStat.getOrDefault("notes", 0)).longValue();
+        favorite.put("count", favTotal);
+        favorite.put("note", linkCount + " 收藏 · " + noteCount + " 笔记");
+        stat.put("favorite", favorite);
+
+        Map<String, Object> english = new HashMap<>();
+        Map<String, Object> engStat = englishTaskService.getStat();
+        english.put("count", engStat.get("avg_completion_rate") + "%");
+        english.put("note", "今日 " + engStat.get("today_done") + "/" + engStat.get("total_tasks") + " 已完成");
+        stat.put("english", english);
 
         return stat;
     }

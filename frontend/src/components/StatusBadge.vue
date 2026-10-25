@@ -48,6 +48,6 @@ withDefaults(
 }
 .status-accent {
   color: $accent-light;
-  background: rgba(124, 58, 237, 0.18);
+  background: rgba(167, 139, 250, 0.18);
 }
 </style>

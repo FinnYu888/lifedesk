@@ -139,7 +139,7 @@ onMounted(load);
   border: 1px solid $border-subtle;
   &.current {
     border-color: $border-accent;
-    background: rgba(124, 58, 237, 0.08);
+    background: rgba(167, 139, 250, 0.08);
   }
 }
 .time-col {

@@ -23,13 +23,32 @@ INSERT IGNORE INTO milestone(id, project_id, name, progress, note, due_date) VAL
 (2, NULL, 'v1.1 重构', 100, '已发布', '2026-10-15'),
 (3, NULL, 'v1.0 发版', 65, '进行中', '2026-10-30');
 
--- 提交动态
-INSERT IGNORE INTO commit_activity(id, author, message, type, time_ago, committed_at) VALUES
-(1, 'liuXin24', 'feat(auth): 完成授权接口', 'feat', '2h 前', '2026-10-24 22:00:00'),
-(2, 'devFsgn', 'fix(api): 修复分页边界', 'fix', '5h 前', '2026-10-24 19:00:00'),
-(3, 'li78672', 'chore(deps): 升级依赖版本', 'chore', '昨天', '2026-10-23 14:00:00'),
-(4, 'm8n42e', 'refactor(core): 重构核心模块', 'refactor', '2 天前', '2026-10-22 10:00:00'),
-(5, 'q7sn5v', 'docs(readme): 补充提交文档', 'docs', '3 天前', '2026-10-21 09:00:00');
+-- 提交动态（关联 project_id 与 sha，便于按项目过滤与同步去重）
+INSERT IGNORE INTO commit_activity(id, project_id, author, message, type, time_ago, committed_at, sha) VALUES
+(1, 1, 'liuXin24', 'feat(auth): 完成授权接口', 'feat', '2h 前', '2026-10-24 22:00:00', 'a1b2c3d4e5'),
+(2, 2, 'devFsgn', 'fix(api): 修复分页边界', 'fix', '5h 前', '2026-10-24 19:00:00', 'b2c3d4e5f6'),
+(3, 4, 'li78672', 'chore(deps): 升级依赖版本', 'chore', '昨天', '2026-10-23 14:00:00', 'c3d4e5f6a7'),
+(4, 4, 'm8n42e', 'refactor(core): 重构核心模块', 'refactor', '2 天前', '2026-10-22 10:00:00', 'd4e5f6a7b8'),
+(5, 7, 'q7sn5v', 'docs(readme): 补充提交文档', 'docs', '3 天前', '2026-10-21 09:00:00', 'e5f6a7b8c9'),
+(6, 1, 'alice', 'Merge pull request #12 from org/feat-auth', 'merge', '2h 前', '2026-10-24 21:30:00', 'f6a7b8c9d0'),
+(7, 2, 'bob', 'Merge pull request #8 from org/fix-pagination', 'merge', '6h 前', '2026-10-24 18:00:00', 'a7b8c9d0e1');
+
+-- Git 合并请求（来自 merge commit 解析）
+INSERT IGNORE INTO pull_request(id, project_id, number, title, author, state, source_branch, target_branch, merged_at, message) VALUES
+(1, 1, '#12', 'feat: 完成授权接口', 'alice', 'merged', 'feat-auth', 'main', '2026-10-24 21:30:00', 'Merge pull request #12 from org/feat-auth'),
+(2, 2, '#8', 'fix: 修复分页边界', 'bob', 'merged', 'fix-pagination', 'main', '2026-10-24 18:00:00', 'Merge pull request #8 from org/fix-pagination'),
+(3, 4, '#21', 'refactor: 重构核心模块', 'm8n42e', 'merged', 'refactor-core', 'main', '2026-10-22 10:00:00', 'Merge pull request #21 from org/refactor-core');
+
+-- Git 发布(标签)记录
+INSERT IGNORE INTO release_record(id, project_id, tag, name, author, published_at, message) VALUES
+(1, 1, 'v1.5.0', 'release: 支付核心 v1.5.0', 'alice', '2026-10-20 10:00:00', '支付通道升级'),
+(2, 4, 'v2.0.3', 'release: 订单中心 v2.0.3', 'm8n42e', '2026-10-18 14:00:00', '订单状态机修复'),
+(3, 2, 'v0.9.1', 'release: 管理后台 v0.9.1', 'bob', '2026-10-15 09:00:00', '权限模型重构');
+
+-- 同步 project 的 git 同步状态字段（commits_count/prs_count/releases_count）
+UPDATE project SET commits_count = 2, prs_count = 1, releases_count = 1, last_sync_at = '2026-10-24 22:00:00' WHERE id IN (1, 2, 4);
+UPDATE project SET commits_count = 1, prs_count = 0, releases_count = 0, last_sync_at = '2026-10-23 14:00:00' WHERE id = 7;
+UPDATE project SET commits_count = 2, prs_count = 1, releases_count = 1, last_sync_at = '2026-10-22 10:00:00' WHERE id = 4;
 
 -- 技能
 INSERT IGNORE INTO skill(id, name, icon, level, stage, progress, description) VALUES
@@ -199,3 +218,43 @@ INSERT IGNORE INTO food_dict(id, name, category, kcal_per100g, default_amount, d
 (28, '黑巧克力', '零食', 546, 30, 'g'),
 (29, '薯片', '零食', 536, 30, 'g'),
 (30, '蛋白棒', '零食', 360, 60, 'g');
+
+-- ========== 收藏与笔记 ==========
+-- type=link 收藏，type=note 笔记
+INSERT IGNORE INTO favorite(id, name, value, type, description) VALUES
+(1, 'Spring Boot 官方文档', 'https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/', 'link', 'Java 框架'),
+(2, 'MDN Web Docs', 'https://developer.mozilla.org/zh-CN/', 'link', 'Web 开发文档'),
+(3, 'Vue 3 中文文档', 'https://cn.vuejs.org/', 'link', '前端框架'),
+(4, 'MyBatis-Plus', 'https://baomidou.com/', 'link', 'ORM 框架'),
+(5, 'Element Plus', 'https://element-plus.org/zh-CN/', 'link', 'UI 组件库'),
+(6, '每日复盘模板', '## 今日完成\n- [ ] 工作\n- [ ] 学习\n- [ ] 运动\n\n## 反思\n（每日 22:00 前）', 'note', '日复盘'),
+(7, '架构设计要点', '1. 单一职责：每个模块只做一件事\n2. 接口优先：先定接口再写实现\n3. 状态外置：业务状态放 DB 而非内存\n4. 异步隔离：长耗时任务异步化', 'note', '工程实践'),
+(8, '英语学习计划', '周一/三/五：听力 30min + 单词 50\n周二/四：阅读 1 篇外刊\n周六：口语跟读 20min\n周日：复盘+笔记', 'note', '学习计划');
+
+-- ========== 英语提升 ==========
+-- 6 条英语能力提升任务
+INSERT IGNORE INTO english_task(id, name, category, daily_goal, target_days, total_completed, streak_days, last_done_date) VALUES
+(1, '每日单词 50', 'vocabulary', '50 个新词 + 复习', 100, 28, 7, CURDATE() - INTERVAL 1 DAY),
+(2, '听力训练 30 分钟', 'listening', 'TED 演讲/VOA 慢速', 90, 35, 12, CURDATE()),
+(3, '外刊阅读 1 篇', 'reading', '经济学人/NYT 头版', 60, 18, 5, CURDATE() - INTERVAL 1 DAY),
+(4, '口语跟读 20 分钟', 'speaking', '影子训练 + 录音回放', 60, 12, 3, CURDATE() - INTERVAL 2 DAY),
+(5, '语法精炼', 'grammar', '1 个语法点 + 5 道题', 30, 22, 9, CURDATE()),
+(6, '英文写作', 'writing', '200 字日记/短文', 30, 8, 4, CURDATE() - INTERVAL 1 DAY);
+
+-- ========== 我的需求 ==========
+-- 三个 Sprint 版本：CDS20261025 / CDS20261018 / CDS20260927
+-- 真实接入后这些 mock 数据可由 INSERT IGNORE 直接保留或忽略
+INSERT IGNORE INTO requirement(id, sprint, person_day, task_status, topic, task_detail, product, tester, source_id) VALUES
+(1,  'CDS20261025', 2.0, 'doing',  '支付通道接入', '对接微信支付 V3 API，完成统一下单与回调验签', '支付中心', '李明', 'CIMC-REQ-1001'),
+(2,  'CDS20261025', 1.5, 'doing',  '订单状态机', '补充订单超时取消、退款回滚的状态流转', '订单中心', '王芳', 'CIMC-REQ-1002'),
+(3,  'CDS20261025', 0.5, 'done',   '文案微调', '首页 banner 文案调整为国庆活动版', '运营中台', '张伟', 'CIMC-REQ-1003'),
+(4,  'CDS20261025', 3.0, 'todo',   '风控规则', '接入第三方风控策略，对高风险订单做二次校验', '风控平台', '陈静', 'CIMC-REQ-1004'),
+(5,  'CDS20261025', 1.0, 'todo',   '权限模型', '管理后台角色按菜单粒度拆分，新增运营角色', '管理后台', '李明', 'CIMC-REQ-1005'),
+(6,  'CDS20261025', 2.0, 'done',   '数据导出', '订单列表支持按时间区间导出 Excel', '订单中心', '王芳', 'CIMC-REQ-1006'),
+(7,  'CDS20261018', 4.0, 'done',   '会员等级', '重构会员等级与积分体系，对接历史数据迁移', '用户中心', '周涛', 'CIMC-REQ-0901'),
+(8,  'CDS20261018', 2.5, 'done',   '优惠券', '满减/折扣/赠券三种券类型发放与核销流程', '营销平台', '陈静', 'CIMC-REQ-0902'),
+(9,  'CDS20261018', 1.0, 'doing',  '消息推送', '站内信模板化，按事件触发推送', '消息中心', '张伟', 'CIMC-REQ-0903'),
+(10, 'CDS20261018', 0.5, 'cancel', '埋点补全', '商品详情页关键事件埋点（已并入下个迭代）', '数据平台', '王芳', 'CIMC-REQ-0904'),
+(11, 'CDS20260927', 3.0, 'done',   '搜索重构', 'Elasticsearch 升级 8.x，重建索引与查询 DSL', '搜索中心', '周涛', 'CIMC-REQ-0801'),
+(12, 'CDS20260927', 2.0, 'done',   '物流接入', '对接顺丰/京东物流轨迹 API 与电子面单', '订单中心', '李明', 'CIMC-REQ-0802'),
+(13, 'CDS20260927', 1.5, 'done',   '退款流程', '原路退款与余额退款分支处理，异常退款工单化', '支付中心', '陈静', 'CIMC-REQ-0803');

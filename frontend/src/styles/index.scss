@@ -11,7 +11,8 @@ body {
   height: 100%;
   font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, sans-serif;
-  background: $bg-page;
+  background: $bg-page-grad;
+  background-attachment: fixed; // 滚动时保持光斑位置稳定
   color: $text-primary;
   -webkit-font-smoothing: antialiased;
 }
@@ -30,7 +31,7 @@ a {
   height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(167, 139, 250, 0.25);
+  background: rgba(196, 181, 253, 0.22);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-track {
@@ -61,16 +62,29 @@ a {
   color: $color-danger;
 }
 
-// 卡片基础
+// 卡片基础 —— Apple 液态玻璃风格
+// backdrop-filter 是关键：让卡片背后内容产生模糊折射，形成玻璃感
 .ld-card {
+  position: relative;
   background: $bg-card;
   border-radius: $radius-card;
-  border: 1px solid $border-subtle;
-  box-shadow: $shadow-card;
+  border: 1px solid $border-glass;
+  box-shadow: $shadow-glass;
   padding: 18px 20px;
-  transition: all 0.2s;
+  // 玻璃折射：模糊 + 饱和度提升，让背景透过来看起来更柔和
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  transition: all 0.25s ease;
   &:hover {
     border-color: $border-accent;
     background: $bg-card-hover;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
   }
+}
+
+// 文本截断工具
+.text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

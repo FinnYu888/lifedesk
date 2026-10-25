@@ -43,6 +43,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "Skills 工坊" }
       },
       {
+        path: "bookmark",
+        name: "Bookmark",
+        component: () => import("@/views/bookmark/index.vue"),
+        meta: { title: "收藏与笔记" }
+      },
+      {
+        path: "english",
+        name: "English",
+        component: () => import("@/views/english/index.vue"),
+        meta: { title: "英语提升" }
+      },
+      {
         path: "health",
         name: "Health",
         component: () => import("@/views/health/index.vue"),

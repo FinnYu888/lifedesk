@@ -52,7 +52,7 @@ function badgeClass(level: number) {
 function progressColor(level: number) {
   if (level >= 5) return "#2dd4bf";
   if (level >= 4) return "#fbbf24";
-  if (level >= 3) return "#7c3aed";
+  if (level >= 3) return "#a78bfa";
   return "#6b7280";
 }
 
@@ -99,7 +99,7 @@ onMounted(load);
 .icon-doubleRing { background: rgba(45, 212, 191, 0.15); color: $color-positive; }
 .icon-triangle { background: rgba(251, 191, 36, 0.15); color: $color-warning; }
 .icon-square { background: rgba(107, 114, 128, 0.18); color: $color-neutral; }
-.icon-star { background: rgba(124, 58, 237, 0.18); color: $accent-light; }
+.icon-star { background: rgba(167, 139, 250, 0.18); color: $accent-light; }
 
 .skill-name {
   font-size: 15px;
@@ -115,7 +115,7 @@ onMounted(load);
 }
 .badge-positive { color: $color-positive; background: rgba(45, 212, 191, 0.12); }
 .badge-warning { color: $color-warning; background: rgba(251, 191, 36, 0.12); }
-.badge-accent { color: $accent-light; background: rgba(124, 58, 237, 0.18); }
+.badge-accent { color: $accent-light; background: rgba(167, 139, 250, 0.18); }
 .badge-neutral { color: $text-secondary; background: rgba(167, 139, 250, 0.08); }
 .badge-accent-light { color: $accent-light; background: rgba(167, 139, 250, 0.15); }
 .skill-desc {

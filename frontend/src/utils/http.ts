@@ -1,6 +1,7 @@
 import axios from "axios";
 import { ElMessage } from "element-plus";
 
+// axios 实例本身已支持 get/post/put/delete/request 方法
 const http = axios.create({
   baseURL: "/api",
   timeout: 15000

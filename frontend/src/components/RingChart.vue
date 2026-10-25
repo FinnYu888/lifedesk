@@ -39,7 +39,7 @@ const props = withDefaults(
   {
     size: 100,
     stroke: 8,
-    color: "#7c3aed",
+    color: "#a78bfa",
     trackColor: "rgba(167,139,250,0.12)"
   }
 );

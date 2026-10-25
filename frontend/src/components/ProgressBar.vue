@@ -25,7 +25,7 @@ withDefaults(
     percent: number;
     color?: string;
   }>(),
-  { color: "#7c3aed" }
+  { color: "#a78bfa" }
 );
 </script>
 

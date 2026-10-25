@@ -305,7 +305,7 @@ const trendOption = computed(() => {
         type: "line",
         smooth: true,
         data: trend.value.map((t: any) => t.net),
-        lineStyle: { color: "#7c3aed", width: 2 },
+        lineStyle: { color: "#a78bfa", width: 2 },
         itemStyle: { color: "#a78bfa" },
       },
     ],
@@ -324,14 +324,14 @@ const weightOption = computed(() => {
       { type: "value", name: "%", min: 17, max: 19, axisLabel: { color: "#a8a0c8", fontSize: 10 } },
     ],
     series: [
-      { name: "体重", type: "line", smooth: true, data: weight.value.map((w: any) => w.weight), lineStyle: { color: "#7c3aed", width: 2 }, itemStyle: { color: "#a78bfa" } },
+      { name: "体重", type: "line", smooth: true, data: weight.value.map((w: any) => w.weight), lineStyle: { color: "#a78bfa", width: 2 }, itemStyle: { color: "#a78bfa" } },
       { name: "体脂", type: "line", smooth: true, yAxisIndex: 1, data: weight.value.map((w: any) => w.fatRate), lineStyle: { color: "#2dd4bf", width: 2 }, itemStyle: { color: "#2dd4bf" } },
     ],
   };
 });
 
 function progressColor(rate: number) {
-  if (rate >= 80) return "#7c3aed";
+  if (rate >= 80) return "#a78bfa";
   if (rate >= 60) return "#a78bfa";
   return "#fbbf24";
 }

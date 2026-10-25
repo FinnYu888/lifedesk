@@ -43,3 +43,19 @@ logging:
   level:
     com.lifedesk: debug
     com.baomidou: warn
+
+# 我的需求：第三方需求平台对接
+# 接口地址 https://wetrans.cimc.cn/gateway/apiIssue/developTask/query（集团内网，外网拦截）
+# 当前部署在外网时调用会失败，自动回退本地 mock 表；后端部署到集团内网后即可拉取真实需求数据
+requirement:
+  remote:
+    enabled: true
+    url: https://wetrans.cimc.cn/gateway/apiIssue/developTask/query
+    token: eyJhbGciOiJIUzI1NiJ9.eyJqdGkiOiIzOCIsInN1YiI6IjE4MDY2MDY1NzAzIiwiaXNzIjoidXNlciIsImlhdCI6MTc5MjkzMTgyMn0.gyr0FLsHUVFX5HSW4NQv5Y-oaUz1fdZzaMGJxt6B1II
+    # 入参固定项
+    project: CDS
+    page-size: 20
+    # 用户 ID 列表（多个用逗号分隔）
+    user-ids: 1980457439697596417
+    # 状态白名单（与远程接口字段值一致）
+    status-list: open,in_progress,unsolved,developed,in_test,for_release
