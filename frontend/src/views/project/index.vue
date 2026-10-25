@@ -834,27 +834,85 @@ onMounted(load);
   margin: 4px 0 10px;
   padding-left: 1px;
 }
+/* el-table 在玻璃卡片中：彻底清掉所有白底，背景跟随卡片玻璃质感 */
 .req-table {
-  background: transparent;
+  background: transparent !important;
+  font-size: 12px;
+  /* CSS 变量给 el-table 内部组件用 */
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
+  --el-table-expanded-cell-bg-color: transparent;
   --el-table-header-bg-color: rgba(167, 139, 250, 0.08);
   --el-table-header-text-color: var(--ld-text-secondary, rgba(255, 255, 255, 0.65));
   --el-table-row-hover-bg-color: rgba(255, 255, 255, 0.04);
+  --el-table-current-row-bg-color: rgba(255, 255, 255, 0.04);
   --el-table-border-color: rgba(255, 255, 255, 0.06);
   --el-table-text-color: var(--ld-text-primary, rgba(255, 255, 255, 0.92));
-  font-size: 12px;
+  /* empty-block / fill 等场景的兜底填充色 */
+  --el-fill-color: transparent;
+  --el-fill-color-light: transparent;
+  --el-fill-color-lighter: transparent;
+  --el-bg-color: transparent;
+  --el-bg-color-page: transparent;
 }
+/* 彻底清掉所有可能的白底元素 */
+.req-table :deep(.el-table__inner-wrapper),
+.req-table :deep(.el-table__body-wrapper),
+.req-table :deep(.el-table__header-wrapper),
+.req-table :deep(.el-table__footer-wrapper),
+.req-table :deep(.el-table__body),
+.req-table :deep(.el-table__header),
+.req-table :deep(.el-table__footer),
+.req-table :deep(.el-table__cell),
+.req-table :deep(.el-table__row),
+.req-table :deep(.el-table__empty-block),
+.req-table :deep(.el-table__empty-text),
+.req-table :deep(.el-table__inner-wrapper::before),
+.req-table :deep(.el-scrollbar),
+.req-table :deep(.el-scrollbar__wrap),
+.req-table :deep(.el-scrollbar__view) {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* 表头轻微紫色高亮 */
 .req-table :deep(th.el-table__cell) {
-  background: rgba(167, 139, 250, 0.08);
+  background: rgba(167, 139, 250, 0.08) !important;
+  background-color: rgba(167, 139, 250, 0.08) !important;
   font-weight: 600;
 }
+/* 行 hover 微高亮（保持玻璃质感） */
+.req-table :deep(.el-table__body tr:hover > td.el-table__cell),
+.req-table :deep(.el-table__body-wrapper .el-table__row:hover > td.el-table__cell) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+/* sticky 固定列（Sprint 列）也要透明，避免 fixed 列下方有白底 */
+.req-table :deep(.el-table__body .el-table__row td.el-table__cell.is-hidden),
+.req-table :deep(.el-table__body .el-table__row th.el-table__cell.is-hidden) {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* 边框颜色淡化（融入玻璃） */
 .req-table :deep(td.el-table__cell),
 .req-table :deep(th.el-table__cell) {
-  border-bottom-color: rgba(255, 255, 255, 0.06);
+  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+  border-right-color: transparent !important;
 }
+/* 滚动条样式适配深色玻璃质感 */
 .req-table :deep(.el-table__body-wrapper) {
   scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+.req-table :deep(.el-table__body-wrapper)::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.req-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.req-table :deep(.el-table__body-wrapper)::-webkit-scrollbar-track {
+  background: transparent;
 }
 .sprint-tag {
   display: inline-block;
