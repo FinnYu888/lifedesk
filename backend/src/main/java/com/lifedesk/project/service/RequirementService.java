@@ -10,15 +10,19 @@ import com.lifedesk.project.mapper.RequirementMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
 import javax.annotation.PostConstruct;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.math.BigDecimal;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.security.cert.X509Certificate;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -31,6 +35,12 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * 我的需求 Service。
@@ -100,13 +110,46 @@ public class RequirementService {
     @Value("${requirement.remote.status-list:open,in_progress,unsolved,developed,in_test,for_release}")
     private String remoteStatusListCsv;
 
-    private RestTemplate restTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    /** sprint 中 8 位日期的解析格式 yyyyMMdd */
     private static final DateTimeFormatter SPRINT_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     /** 匹配 sprint 末尾 8 位数字（CDS20261025 -> 20261025） */
     private static final Pattern SPRINT_DATE_PATTERN = Pattern.compile("(\\d{8})$");
+
+    /**
+     * 信任所有证书的 SSLSocketFactory。
+     *
+     * <p>第三方需求接口 {@code wetrans.cimc.cn} 部署在集团内网，HTTPS 可能使用自签证书或
+     * 内部 CA 签发的证书，外网/JVM 默认 truststore 不一定包含，导致 {@code PKIX path building failed}。
+     * 此 factory 仅作用于本服务发起的远程调用（通过 HttpsURLConnection.setSSLSocketFactory），
+     * 不污染 JVM 全局，也不影响其他业务（如 MySQL JDBC）。</p>
+     */
+    private static final SSLSocketFactory SSL_TRUST_ALL_FACTORY = createTrustAllSocketFactory();
+
+    private static SSLSocketFactory createTrustAllSocketFactory() {
+        try {
+            SSLContext ctx = SSLContext.getInstance("TLS");
+            ctx.init(null, new TrustManager[]{new X509TrustManager() {
+                @Override
+                public void checkClientTrusted(X509Certificate[] chain, String authType) {
+                    // 信任所有客户端证书
+                }
+
+                @Override
+                public void checkServerTrusted(X509Certificate[] chain, String authType) {
+                    // 信任所有服务端证书（含自签）
+                }
+
+                @Override
+                public X509Certificate[] getAcceptedIssuers() {
+                    return new X509Certificate[0];
+                }
+            }}, new SecureRandom());
+            return ctx.getSocketFactory();
+        } catch (Exception e) {
+            // 极端情况退回 JVM 默认
+            return (SSLSocketFactory) SSLSocketFactory.getDefault();
+        }
+    }
 
     /** 远程状态 → 本地状态映射 */
     private static final Map<String, String> STATUS_MAP = new HashMap<String, String>() {{
@@ -120,7 +163,6 @@ public class RequirementService {
 
     @PostConstruct
     public void init() {
-        this.restTemplate = new RestTemplate();
         log.info("RequirementService 初始化：remoteEnabled={}, project={}, pageSize={}, userIds={}, statusList={}",
                 remoteEnabled, remoteProject, remotePageSize,
                 remoteUserIds == null || remoteUserIds.isEmpty() ? "无" : remoteUserIds,
@@ -216,41 +258,110 @@ public class RequirementService {
     /**
      * 远程接口调用：POST https://wetrans.cimc.cn/gateway/apiIssue/developTask/query
      *
-     * <p>Header: Authorization: Bearer <token>, Content-Type: application/json
-     * Body: 由 application.yml 的 project/pageSize/userIds/statusList 配置构造</p>
+     * <p><b>鉴权头</b>：{@code Authorization: <token>}（直接放 JWT，<b>不带 Bearer 前缀</b>）。
+     * 用户工具验证：直接 Authorization 头可以调通，加 Bearer 反而被拒。</p>
      *
-     * <p>返回解析假设：JSON 结构为 {@code {code, data: {list:[...], total:N}}}
-     * 或 {@code {code, data: [...]}}，兼容两种；list 元素字段名做常见映射：
-     * sprint/sprintName/sprintCode, personDay/manDay/workDay,
-     * status/state, topic/title, taskDetail/detail/desc/description,
+     * <p><b>HTTPS 证书容错</b>：第三方接口部署在集团内网，可能使用自签证书或内部 CA，
+     * 此处用 {@link #SSL_TRUST_ALL_FACTORY} 仅对本请求关闭证书校验，
+     * 不影响 JVM 全局（不污染其他 HTTPS 业务如 GitHub API 调用）。</p>
+     *
+     * <p><b>Body</b>：由 application.yml 的 project/pageSize/userIds/statusList 配置构造。</p>
+     *
+     * <p><b>返回解析</b>：兼容 {@code {code, data:{list|records|rows:[...]}}} 与 {@code {code, data:[...]}}
+     * 两种结构；list 元素字段名做常见兜底映射：sprint/sprintName/sprintCode,
+     * personDay/manDay/workDay, status/state, topic/title, taskDetail/detail/desc/description,
      * product/productName, tester/testerName/testUser</p>
      *
      * @return 解析后的需求列表；调用失败返回 null 由调用方回退本地
      */
     private List<Requirement> fetchFromRemote() {
+        HttpURLConnection conn = null;
         try {
-            // 构造入参
+            // 构造入参 JSON
             Map<String, Object> payload = buildRemotePayload();
+            String bodyJson = objectMapper.writeValueAsString(payload);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.setBearerAuth(remoteToken);
+            URL url = new URL(remoteUrl);
+            conn = (HttpURLConnection) url.openConnection();
 
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(payload, headers);
-            ResponseEntity<String> resp = restTemplate.postForEntity(remoteUrl, entity, String.class);
+            // HTTPS：仅对本请求关闭证书校验（内网自签证书容错），不污染 JVM 全局
+            if (conn instanceof HttpsURLConnection) {
+                HttpsURLConnection https = (HttpsURLConnection) conn;
+                https.setSSLSocketFactory(SSL_TRUST_ALL_FACTORY);
+                https.setHostnameVerifier((hostname, session) -> true);
+            }
 
-            if (resp.getStatusCodeValue() != 200 || resp.getBody() == null) {
-                log.warn("远程需求接口异常状态：status={}", resp.getStatusCodeValue());
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            // 关键：直接 Authorization: <token>，不加 Bearer 前缀
+            conn.setRequestProperty("Authorization", remoteToken);
+            conn.setRequestProperty("Accept", "application/json");
+            // 关闭 keep-alive（避免连接复用导致的 SSL 状态泄漏）
+            conn.setRequestProperty("Connection", "close");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setDoOutput(true);
+            conn.setInstanceFollowRedirects(false);
+
+            byte[] bodyBytes = bodyJson.getBytes(StandardCharsets.UTF_8);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(bodyBytes);
+                os.flush();
+            }
+
+            int status = conn.getResponseCode();
+            if (status != 200) {
+                // 读取错误响应体（如 4xx/5xx 时 getInputStream 抛异常，需用 getErrorStream）
+                String errBody = readErrorStream(conn);
+                log.warn("远程需求接口异常状态：status={}, errBody={}",
+                        status, errBody == null ? "(无响应体)" : (errBody.length() > 300 ? errBody.substring(0, 300) + "..." : errBody));
                 return null;
             }
 
-            String body = resp.getBody();
+            String body = readStream(conn);
             log.debug("远程需求接口响应：bodyLen={}, 前500字符={}", body.length(),
                     body.length() > 500 ? body.substring(0, 500) : body);
 
             return parseRemoteResponse(body);
+        } catch (java.net.UnknownHostException | java.net.ConnectException e) {
+            log.warn("远程需求接口不可达（网络/代理拦截，回退本地 mock）：{}", e.getMessage());
+            return null;
         } catch (Exception e) {
-            log.warn("远程需求接口调用异常：{}", e.getMessage());
+            log.warn("远程需求接口调用异常：{} {}", e.getClass().getSimpleName(), e.getMessage());
+            return null;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    /** 读取 HTTP 响应输入流为 UTF-8 字符串 */
+    private String readStream(HttpURLConnection conn) throws java.io.IOException {
+        try (InputStream is = conn.getInputStream();
+             BufferedReader reader = new BufferedReader(
+                     new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            return sb.toString();
+        }
+    }
+
+    /** 读取 HTTP 错误响应流（4xx/5xx 时 getInputStream 抛异常，需用 getErrorStream） */
+    private String readErrorStream(HttpURLConnection conn) {
+        try (InputStream is = conn.getErrorStream();
+             BufferedReader reader = new BufferedReader(
+                     new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            return sb.toString();
+        } catch (Exception e) {
             return null;
         }
     }
@@ -327,18 +438,38 @@ public class RequirementService {
         }
     }
 
-    /** 把远程 JSON 单条映射为 Requirement；尝试多个候选字段名兜底 */
+    /**
+     * 把远程 JSON 单条映射为 Requirement。
+     *
+     * <p>远程接口 {@code wetrans.cimc.cn/gateway/apiIssue/developTask/query} 返回的 records 元素
+     * 实际字段名（已通过调试日志确认）：
+     * id, title, content, taskNo, personDays, productOwner, status, taskType, sprintId,
+     * project, scope, urgency, issueId, testUser, userId, deadlineTime, startTime, closeTime,
+     * createUser, createTime, updateUser, updateTime, sprintName, version, issueNo,
+     * issueStatus, issueSubTitle, createUserName, testUserName, productOwnerName, userName</p>
+     *
+     * <p>映射策略：按候选字段名顺序取第一个非空。优先用展示性字段（如 *Name 后缀的中文姓名），
+     * 其次用 ID 字段。</p>
+     */
     private Requirement mapRemoteItem(JsonNode item) {
         Requirement r = new Requirement();
-        r.setSprint(firstNonBlank(item, "sprint", "sprintName", "sprintCode", "iteration"));
-        r.setPersonDay(toBigDecimal(firstNonBlank(item, "personDay", "manDay", "workDay", "estimate")));
-        String remoteStatus = firstNonBlank(item, "status", "state", "taskStatus", "task_status");
+        // Sprint：优先 sprintName（CDS20261025），其次 sprintId/version
+        r.setSprint(firstNonBlank(item, "sprintName", "sprintId", "sprint", "sprintCode", "iteration", "version"));
+        // 人天：远程字段是 personDays（带 s）
+        r.setPersonDay(toBigDecimal(firstNonBlank(item, "personDays", "personDay", "manDay", "workDay", "estimate")));
+        // 状态：优先 status，其次 issueStatus
+        String remoteStatus = firstNonBlank(item, "status", "issueStatus", "state", "taskStatus", "task_status");
         r.setTaskStatus(mapStatus(remoteStatus));
-        r.setTopic(firstNonBlank(item, "topic", "title", "subject", "module"));
-        r.setTaskDetail(firstNonBlank(item, "taskDetail", "detail", "desc", "description", "content", "summary"));
-        r.setProduct(firstNonBlank(item, "product", "productName", "projectName", "module"));
-        r.setTester(firstNonBlank(item, "tester", "testerName", "testUser", "qa"));
-        r.setSourceId(firstNonBlank(item, "id", "taskId", "issueId", "key"));
+        // 关联话题：优先 title，其次 issueSubTitle/taskNo/issueNo
+        r.setTopic(firstNonBlank(item, "title", "topic", "subject", "issueSubTitle", "module", "taskNo", "issueNo"));
+        // 任务详情：优先 content（HTML），其次 description/summary
+        r.setTaskDetail(firstNonBlank(item, "content", "taskDetail", "detail", "desc", "description", "summary"));
+        // 产品：远程没有"产品"字段，用 productOwnerName（产品负责人姓名）兜底
+        r.setProduct(firstNonBlank(item, "productOwnerName", "productOwner", "product", "productName", "projectName", "module", "project"));
+        // 测试人：优先 testUserName（中文姓名），其次 testUser（ID）
+        r.setTester(firstNonBlank(item, "testUserName", "testerName", "tester", "testUser", "qa", "userName"));
+        // 第三方 ID：优先 id，其次 issueId/taskNo/issueNo
+        r.setSourceId(firstNonBlank(item, "id", "taskId", "issueId", "taskNo", "issueNo", "key"));
         // 若任务详情为空但有标题，用标题兜底
         if ((r.getTaskDetail() == null || r.getTaskDetail().isEmpty()) && r.getTopic() != null) {
             r.setTaskDetail(r.getTopic());
