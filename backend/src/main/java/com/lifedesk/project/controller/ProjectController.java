@@ -63,7 +63,7 @@ public class ProjectController {
      * <p>远程接口暂不通，回退本地 mock 表，后续提供 token 后无缝切换。</p>
      *
      * @param sprint  可选 sprint 过滤（CDS20261025）
-     * @param status  可选任务状态过滤：todo/doing/done/cancel
+     * @param status  可选任务状态过滤：todo/doing/testing/pending/done
      * @param keyword 可选关键词，按 任务详情/关联话题/产品/测试人 模糊匹配
      */
     @GetMapping("/requirements")
@@ -71,6 +71,20 @@ public class ProjectController {
                                               @RequestParam(required = false) String status,
                                               @RequestParam(required = false) String keyword) {
         return R.ok(requirementService.list(sprint, status, keyword));
+    }
+
+    /**
+     * 我的需求详情：用户点击列表行触发，调用第三方接口
+     * {@code GET https://wetrans.cimc.cn/gateway/apiIssue/developTask/getDetail?id=<sourceId>}。
+     *
+     * <p>鉴权头与列表接口一致（{@code Authorization: <token>}）。返回原始详情对象，
+     * 含 content HTML（含 img 标签），前端用 v-html 渲染图片。</p>
+     *
+     * @param sourceId 需求在第三方平台的 ID（即列表行的 sourceId 字段）
+     */
+    @GetMapping("/requirements/{sourceId}/detail")
+    public R<Map<String, Object>> requirementDetail(@PathVariable String sourceId) {
+        return R.ok(requirementService.fetchDetail(sourceId));
     }
 
     /** 新建项目 */

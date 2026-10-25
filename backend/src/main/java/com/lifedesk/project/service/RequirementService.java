@@ -86,6 +86,10 @@ public class RequirementService {
     @Value("${requirement.remote.url:https://wetrans.cimc.cn/gateway/apiIssue/developTask/query}")
     private String remoteUrl;
 
+    /** 第三方需求详情接口地址（GET ?id=...） */
+    @Value("${requirement.remote.detail-url:https://wetrans.cimc.cn/gateway/apiIssue/developTask/getDetail}")
+    private String remoteDetailUrl;
+
     /** 远程接口调用 token（JWT） */
     @Value("${requirement.remote.token:}")
     private String remoteToken;
@@ -151,14 +155,22 @@ public class RequirementService {
         }
     }
 
-    /** 远程状态 → 本地状态映射 */
+    /** 远程状态 → 本地状态映射（按用户提供的枚举确认）
+     * <ul>
+     *   <li>open        → todo（待办）</li>
+     *   <li>in_progress   → doing（进行中）</li>
+     *   <li>in_test      → testing（提测）</li>
+     *   <li>for_release  → pending（待发版）</li>
+     *   <li>developed    → done（完成）</li>
+     * </ul>
+     * 注：远程未识别的状态兜底为 todo，避免列表展示空。
+     */
     private static final Map<String, String> STATUS_MAP = new HashMap<String, String>() {{
         put("open", "todo");
-        put("unsolved", "todo");
         put("in_progress", "doing");
-        put("in_test", "doing");
+        put("in_test", "testing");
+        put("for_release", "pending");
         put("developed", "done");
-        put("for_release", "done");
     }};
 
     @PostConstruct
@@ -457,20 +469,39 @@ public class RequirementService {
         r.setSprint(firstNonBlank(item, "sprintName", "sprintId", "sprint", "sprintCode", "iteration", "version"));
         // 人天：远程字段是 personDays（带 s）
         r.setPersonDay(toBigDecimal(firstNonBlank(item, "personDays", "personDay", "manDay", "workDay", "estimate")));
-        // 状态：优先 status，其次 issueStatus
+        // 状态：用户确认枚举 open/in_progress/in_test/for_release/developed
         String remoteStatus = firstNonBlank(item, "status", "issueStatus", "state", "taskStatus", "task_status");
         r.setTaskStatus(mapStatus(remoteStatus));
-        // 关联话题：优先 title，其次 issueSubTitle/taskNo/issueNo
-        r.setTopic(firstNonBlank(item, "title", "topic", "subject", "issueSubTitle", "module", "taskNo", "issueNo"));
-        // 任务详情：优先 content（HTML），其次 description/summary
-        r.setTaskDetail(firstNonBlank(item, "content", "taskDetail", "detail", "desc", "description", "summary"));
-        // 产品：远程没有"产品"字段，用 productOwnerName（产品负责人姓名）兜底
+        // 关联话题：用户指定用 issueNo
+        r.setTopic(firstNonBlank(item, "issueNo", "issueId", "issueSubTitle"));
+        // 任务详情：用户指定 = taskNo + " " + title；
+        // 若 content 去标签后是"同上"，则取 title 的值
+        String taskNo = firstNonBlank(item, "taskNo");
+        String title = firstNonBlank(item, "title");
+        String content = firstNonBlank(item, "content");
+        String strippedContent = stripHtml(content);
+        boolean isTongShang = strippedContent != null && strippedContent.trim().equals("同上");
+
+        String taskDetail;
+        if (isTongShang) {
+            taskDetail = title;
+        } else {
+            StringBuilder sb = new StringBuilder();
+            if (taskNo != null && !taskNo.isEmpty()) sb.append(taskNo);
+            if (title != null && !title.isEmpty()) {
+                if (sb.length() > 0) sb.append(' ');
+                sb.append(title);
+            }
+            taskDetail = sb.length() > 0 ? sb.toString() : strippedContent;
+        }
+        r.setTaskDetail(taskDetail);
+        // 产品：远程无"产品"字段，用 productOwnerName 兜底
         r.setProduct(firstNonBlank(item, "productOwnerName", "productOwner", "product", "productName", "projectName", "module", "project"));
         // 测试人：优先 testUserName（中文姓名），其次 testUser（ID）
         r.setTester(firstNonBlank(item, "testUserName", "testerName", "tester", "testUser", "qa", "userName"));
-        // 第三方 ID：优先 id，其次 issueId/taskNo/issueNo
+        // 第三方 ID
         r.setSourceId(firstNonBlank(item, "id", "taskId", "issueId", "taskNo", "issueNo", "key"));
-        // 若任务详情为空但有标题，用标题兜底
+        // 若任务详情为空但有标题（极少数情况），用标题兜底
         if ((r.getTaskDetail() == null || r.getTaskDetail().isEmpty()) && r.getTopic() != null) {
             r.setTaskDetail(r.getTopic());
         }
@@ -481,11 +512,104 @@ public class RequirementService {
         return r;
     }
 
-    /** 远程状态 → 本地状态：open/unsolved→todo, in_progress/in_test→doing, developed/for_release→done */
+    /**
+     * 简单去 HTML 标签：把所有 &lt;...&gt; 替换为空字符串，得到纯文本。
+     * 仅用于列表"任务详情"列判断"同上"和兜底展示，不依赖 DOM 解析库。
+     */
+    private String stripHtml(String html) {
+        if (html == null || html.isEmpty()) return null;
+        // 去 HTML 标签
+        String text = html.replaceAll("<[^>]+>", "");
+        // 去常见 HTML 实体（&nbsp; &amp; 等）保留可读性
+        text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"");
+        // 折叠多余空白
+        text = text.replaceAll("\\s+", " ").trim();
+        return text.isEmpty() ? null : text;
+    }
+
+    /** 远程状态 → 本地状态映射：见 STATUS_MAP 注释 */
     private String mapStatus(String remoteStatus) {
         if (remoteStatus == null) return "todo";
         String mapped = STATUS_MAP.get(remoteStatus);
         return mapped != null ? mapped : "todo";
+    }
+
+    /**
+     * 获取单个需求的详情（用户点击行触发）。
+     *
+     * <p>远程接口：{@code GET https://wetrans.cimc.cn/gateway/apiIssue/developTask/getDetail?id=<id>}
+     * 鉴权头：{@code Authorization: <token>}（与 query 接口一致，不加 Bearer）。
+     * 远程返回结构假设：{@code {code, msg, success, data:{...详情对象...}}}
+     * 本方法把 {@code data} 节点原样转为 Map 返回，保留所有字段（含 content HTML、img 标签等）。</p>
+     *
+     * <p>失败时返回空 Map（前端弹窗展示"详情获取失败"提示）。</p>
+     *
+     * @param sourceId 需求在第三方平台的 ID（即列表行的 sourceId 字段）
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> fetchDetail(String sourceId) {
+        if (sourceId == null || sourceId.trim().isEmpty()) {
+            log.warn("fetchDetail: sourceId 为空");
+            return new HashMap<>();
+        }
+        HttpURLConnection conn = null;
+        try {
+            // 拼接 GET URL：远程接口用 query string 传 id
+            String fullUrl = remoteDetailUrl + "?id=" + java.net.URLEncoder.encode(sourceId, "UTF-8");
+            URL url = new URL(fullUrl);
+            conn = (HttpURLConnection) url.openConnection();
+
+            // HTTPS：仅对本请求关闭证书校验
+            if (conn instanceof HttpsURLConnection) {
+                HttpsURLConnection https = (HttpsURLConnection) conn;
+                https.setSSLSocketFactory(SSL_TRUST_ALL_FACTORY);
+                https.setHostnameVerifier((hostname, session) -> true);
+            }
+
+            conn.setRequestMethod("GET");
+            // 鉴权头与 query 接口一致：直接 Authorization: <token>
+            conn.setRequestProperty("Authorization", remoteToken);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("Connection", "close");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setInstanceFollowRedirects(false);
+
+            int status = conn.getResponseCode();
+            if (status != 200) {
+                String errBody = readErrorStream(conn);
+                log.warn("远程详情接口异常状态：status={}, sourceId={}, errBody={}",
+                        status, sourceId,
+                        errBody == null ? "(无响应体)" : (errBody.length() > 300 ? errBody.substring(0, 300) + "..." : errBody));
+                return new HashMap<>();
+            }
+
+            String body = readStream(conn);
+            log.debug("远程详情接口响应：sourceId={}, bodyLen={}", sourceId, body.length());
+
+            // 解析 JSON：取出 data 节点原样返回
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode data = root.get("data");
+            if (data == null || data.isNull()) {
+                log.warn("远程详情返回缺少 data 字段：root keys={}, sourceId={}",
+                        root.fieldNames().toString(), sourceId);
+                return new HashMap<>();
+            }
+            // Jackson 转 Map：保留所有字段（含 content HTML、img 标签）
+            return objectMapper.treeToValue(data, Map.class);
+        } catch (java.net.UnknownHostException | java.net.ConnectException e) {
+            log.warn("远程详情接口不可达（网络/代理拦截）：sourceId={}, {}", sourceId, e.getMessage());
+            return new HashMap<>();
+        } catch (Exception e) {
+            log.warn("远程详情接口调用异常：sourceId={}, {} {}",
+                    sourceId, e.getClass().getSimpleName(), e.getMessage());
+            return new HashMap<>();
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
     }
 
     /** 取多个候选字段中第一个非空字符串值 */

@@ -102,7 +102,9 @@
             >
               <el-option label="待办" value="todo" />
               <el-option label="进行中" value="doing" />
-              <el-option label="已完成" value="done" />
+              <el-option label="提测" value="testing" />
+              <el-option label="待发版" value="pending" />
+              <el-option label="完成" value="done" />
               <el-option label="已取消" value="cancel" />
             </el-select>
             <el-input
@@ -117,15 +119,17 @@
           </div>
         </div>
         <div class="req-tip text-tertiary">
-          来源：wetrans.cimc.cn/gateway/apiIssue/developTask/query（接口暂未通，本地 mock）
+          来源：wetrans.cimc.cn/gateway/apiIssue/developTask/query（点击行查看详情）
         </div>
         <el-table
           :data="requirements"
           size="small"
-          stripe
           class="req-table"
           :max-height="420"
           empty-text="暂无需求"
+          highlight-current-row
+          @row-click="onReqRowClick"
+          :row-style="{ cursor: 'pointer' }"
         >
           <el-table-column prop="sprint" label="Sprint" width="130" fixed>
             <template #default="{ row }">
@@ -239,6 +243,106 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 需求详情弹窗：点击列表行触发，调用 developTask/getDetail?id=... -->
+    <el-dialog
+      v-model="detailDialog.visible"
+      title="需求详情"
+      width="760px"
+      :close-on-click-modal="true"
+      class="req-detail-dialog"
+    >
+      <div v-loading="detailDialog.loading" class="req-detail-body">
+        <template v-if="detailDialog.data">
+          <!-- 标题区 -->
+          <div class="detail-title">
+            <span v-if="detailDialog.data.taskNo" class="detail-task-no">
+              {{ detailDialog.data.taskNo }}
+            </span>
+            <span class="detail-title-text">
+              {{ detailDialog.data.title || '（无标题）' }}
+            </span>
+            <span
+              v-if="detailDialog.data.status"
+              class="status-tag"
+              :class="reqStatusCls(mapRemoteStatusToLocal(detailDialog.data.status))"
+              style="margin-left: 8px"
+            >
+              {{ reqStatusText(mapRemoteStatusToLocal(detailDialog.data.status)) }}
+            </span>
+          </div>
+
+          <!-- 元信息网格 -->
+          <div class="detail-meta">
+            <div class="meta-item">
+              <span class="meta-label">Sprint</span>
+              <span class="meta-value">{{ detailDialog.data.sprintName || detailDialog.data.sprintId || '—' }}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">人/天</span>
+              <span class="meta-value">{{ detailDialog.data.personDays ?? '—' }}</span>
+            </div>
+            <div class="meta-item" v-if="detailDialog.data.issueNo">
+              <span class="meta-label">关联话题</span>
+              <span class="meta-value">{{ detailDialog.data.issueNo }}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">产品</span>
+              <span class="meta-value">
+                {{ detailDialog.data.productOwnerName || detailDialog.data.productOwner || '—' }}
+              </span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">测试人</span>
+              <span class="meta-value">
+                {{ detailDialog.data.testUserName || detailDialog.data.testUser || '—' }}
+              </span>
+            </div>
+            <div class="meta-item" v-if="detailDialog.data.deadlineTime">
+              <span class="meta-label">截止时间</span>
+              <span class="meta-value">{{ formatTime(detailDialog.data.deadlineTime) }}</span>
+            </div>
+            <div class="meta-item" v-if="detailDialog.data.createUserName">
+              <span class="meta-label">创建人</span>
+              <span class="meta-value">{{ detailDialog.data.createUserName }}</span>
+            </div>
+            <div class="meta-item" v-if="detailDialog.data.createTime">
+              <span class="meta-label">创建时间</span>
+              <span class="meta-value">{{ formatTime(detailDialog.data.createTime) }}</span>
+            </div>
+            <div class="meta-item" v-if="detailDialog.data.updateUserName">
+              <span class="meta-label">更新人</span>
+              <span class="meta-value">{{ detailDialog.data.updateUserName }}</span>
+            </div>
+            <div class="meta-item" v-if="detailDialog.data.updateTime">
+              <span class="meta-label">更新时间</span>
+              <span class="meta-value">{{ formatTime(detailDialog.data.updateTime) }}</span>
+            </div>
+          </div>
+
+          <!-- 详情正文（HTML 含 img 标签，v-html 直接渲染图片） -->
+          <div class="detail-section">
+            <div class="detail-section-title">详情内容</div>
+            <div
+              v-if="detailDialog.data.content"
+              class="detail-content"
+              v-html="detailDialog.data.content"
+            />
+            <div v-else class="detail-content detail-empty text-tertiary">
+              （无详情内容）
+            </div>
+          </div>
+        </template>
+
+        <!-- 加载失败 / 远程不可达 -->
+        <div
+          v-else-if="!detailDialog.loading"
+          class="detail-empty text-tertiary"
+        >
+          详情获取失败（远程接口不可达或返回为空）
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -260,8 +364,10 @@ import {
 import {
   fetchRequirements,
   fetchRequirementMilestones,
+  fetchRequirementDetail,
   type Requirement,
-  type RequirementMilestone
+  type RequirementMilestone,
+  type RequirementDetail
 } from "@/api/requirement";
 
 defineOptions({ name: "ProjectView" });
@@ -282,6 +388,19 @@ const submitting = ref(false);
 const syncingId = ref<number | null>(null);
 const deletingId = ref<number | null>(null);
 const editingId = ref<number | null>(null);
+
+/** 需求详情弹窗状态 */
+const detailDialog = ref<{
+  visible: boolean;
+  loading: boolean;
+  data: RequirementDetail | null;
+  sourceId: string | null;
+}>({
+  visible: false,
+  loading: false,
+  data: null,
+  sourceId: null
+});
 
 const form = ref<{
   id: number | null;
@@ -530,15 +649,19 @@ function milestoneLabel(m: RequirementMilestone): string {
   return `${m.name} · ${mm}-${dd}`;
 }
 
-/** 需求任务状态文案 */
+/** 需求任务状态文案（按用户提供的枚举） */
 function reqStatusText(s?: string): string {
   switch (s) {
     case "todo":
       return "待办";
     case "doing":
       return "进行中";
+    case "testing":
+      return "提测";
+    case "pending":
+      return "待发版";
     case "done":
-      return "已完成";
+      return "完成";
     case "cancel":
       return "已取消";
     default:
@@ -553,6 +676,10 @@ function reqStatusCls(s?: string): string {
       return "st-todo";
     case "doing":
       return "st-doing";
+    case "testing":
+      return "st-testing";
+    case "pending":
+      return "st-pending";
     case "done":
       return "st-done";
     case "cancel":
@@ -560,6 +687,66 @@ function reqStatusCls(s?: string): string {
     default:
       return "st-todo";
   }
+}
+
+/**
+ * 详情弹窗里的远程原始 status → 本地状态（用于状态标签渲染）。
+ * 后端列表已映射过，但详情接口返回的是原始 status（open/in_progress/in_test/for_release/developed）。
+ */
+function mapRemoteStatusToLocal(remote?: string): string {
+  switch (remote) {
+    case "open":
+      return "todo";
+    case "in_progress":
+      return "doing";
+    case "in_test":
+      return "testing";
+    case "for_release":
+      return "pending";
+    case "developed":
+      return "done";
+    default:
+      return "todo";
+  }
+}
+
+/** 点击需求列表行 → 弹详情 */
+async function onReqRowClick(row: Requirement) {
+  if (!row.sourceId) {
+    ElMessage.warning("该需求无 sourceId，无法查询详情");
+    return;
+  }
+  detailDialog.value = {
+    visible: true,
+    loading: true,
+    data: null,
+    sourceId: row.sourceId
+  };
+  try {
+    const r = await fetchRequirementDetail(row.sourceId);
+    detailDialog.value.data = (r.data as RequirementDetail) || null;
+  } catch (e: any) {
+    /* 拦截器已提示 */
+    detailDialog.value.data = null;
+  } finally {
+    detailDialog.value.loading = false;
+  }
+}
+
+/** 详情字段时间格式化：远程返回毫秒时间戳或 ISO 字符串，统一转为 yyyy-MM-dd HH:mm */
+function formatTime(v: any): string {
+  if (v == null || v === "") return "—";
+  // 毫秒时间戳
+  if (typeof v === "number" || /^\d+$/.test(String(v))) {
+    const d = new Date(Number(v));
+    if (!isNaN(d.getTime())) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
+  }
+  // ISO 字符串或其他
+  const s = String(v);
+  if (s.length >= 16) return s.substring(0, 16).replace("T", " ");
+  return s;
 }
 
 function commitColor(type?: string) {
@@ -944,6 +1131,14 @@ onMounted(load);
   background: rgba(251, 191, 36, 0.16);
   color: #fbbf24;
 }
+.status-tag.st-testing {
+  background: rgba(96, 165, 250, 0.16);
+  color: #60a5fa;
+}
+.status-tag.st-pending {
+  background: rgba(167, 139, 250, 0.16);
+  color: #a78bfa;
+}
 .status-tag.st-done {
   background: rgba(45, 212, 191, 0.16);
   color: #2dd4bf;
@@ -1003,5 +1198,145 @@ onMounted(load);
 :deep(.el-divider__text) {
   font-size: 12px;
   color: $text-tertiary;
+}
+
+/* ========== 需求详情弹窗（玻璃风格） ========== */
+/* el-dialog 容器：透明化背景，跟随页面玻璃质感 */
+.req-detail-dialog :deep(.el-dialog) {
+  background: rgba(28, 28, 36, 0.78) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.req-detail-dialog :deep(.el-dialog__header) {
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-right: 0;
+}
+.req-detail-dialog :deep(.el-dialog__title) {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ld-text-primary, rgba(255, 255, 255, 0.92));
+}
+.req-detail-dialog :deep(.el-dialog__headerbtn .el-dialog__close) {
+  color: var(--ld-text-secondary, rgba(255, 255, 255, 0.65));
+}
+.req-detail-dialog :deep(.el-dialog__body) {
+  padding: 18px 22px 22px;
+  color: var(--ld-text-primary, rgba(255, 255, 255, 0.92));
+}
+.req-detail-body {
+  min-height: 200px;
+}
+.detail-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ld-text-primary, rgba(255, 255, 255, 0.92));
+}
+.detail-task-no {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  background: rgba(167, 139, 250, 0.14);
+  color: #a78bfa;
+  padding: 2px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+}
+.detail-title-text {
+  flex: 1;
+  word-break: break-all;
+}
+/* 元信息网格 */
+.detail-meta {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px 18px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  margin-bottom: 18px;
+}
+.meta-item {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.meta-label {
+  flex-shrink: 0;
+  width: 64px;
+  color: var(--ld-text-tertiary, rgba(255, 255, 255, 0.45));
+}
+.meta-value {
+  flex: 1;
+  word-break: break-all;
+  color: var(--ld-text-secondary, rgba(255, 255, 255, 0.7));
+}
+/* 详情正文区 */
+.detail-section {
+  margin-top: 6px;
+}
+.detail-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ld-text-tertiary, rgba(255, 255, 255, 0.45));
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.detail-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ld-text-primary, rgba(255, 255, 255, 0.88));
+  word-break: break-word;
+  /* 容许图片自适应 */
+}
+.detail-content :deep(p) {
+  margin: 6px 0;
+}
+.detail-content :deep(ol),
+.detail-content :deep(ul) {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+.detail-content :deep(li) {
+  margin: 4px 0;
+}
+.detail-content :deep(figure) {
+  margin: 10px 0;
+  text-align: center;
+}
+.detail-content :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+.detail-content :deep(a) {
+  color: #a78bfa;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(167, 139, 250, 0.4);
+}
+.detail-content :deep(a:hover) {
+  border-bottom-style: solid;
+}
+.detail-empty {
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 0;
+}
+/* 弹窗 loading 容器透明背景 */
+.req-detail-dialog :deep(.el-loading-mask) {
+  background: transparent;
 }
 </style>
