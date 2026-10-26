@@ -66,3 +66,15 @@ requirement:
     user-ids: 1980457439697596417
     # 状态白名单（与远程接口字段值一致）
     status-list: open,in_progress,unsolved,developed,in_test,for_release
+
+# RPT 接口测试用例平台对接（项目管理-用例通过率卡片）
+# 登录接口 POST {base-url}/api/auth/login/password（selectTenantId=29 盐田堆场 / 30 蛇口堆场）
+# 统计接口 GET  {base-url}/api/stats/modules（Authorization: Bearer <token>）
+# tenants: 参与统计的租户 id，逗号分隔循环获取
+rpt:
+  remote:
+    base-url: http://10.139.92.114:8098
+    username: ypf
+    password: Finn@610810
+    cds-version: "5"
+    tenants: 29,30

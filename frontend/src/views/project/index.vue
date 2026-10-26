@@ -8,6 +8,71 @@
       <StatCard label="本周新仓库" :value="stat.new_repos ?? 0" note="近 7 天新增" noteType="neutral" />
     </div>
 
+    <!-- 用例通过率（RPT 测试用例平台，盐田/蛇口双租户） -->
+    <div class="ld-card pass-rate-card">
+      <div class="card-head">
+        <div class="card-title">用例通过率</div>
+        <div class="pr-toolbar">
+          <el-radio-group v-model="rptTenant" size="small" @change="onRptTenantChange">
+            <el-radio-button
+              v-for="t in rptTenants"
+              :key="t.tenantId"
+              :label="t.tenantId"
+            >{{ t.shortName }}</el-radio-button>
+          </el-radio-group>
+          <div class="pr-view-toggle">
+            <el-tooltip content="网格视图" placement="top">
+              <button class="pr-view-btn" :class="{ on: rptView === 'grid' }" @click="rptView = 'grid'">
+                <el-icon><Grid /></el-icon>
+              </button>
+            </el-tooltip>
+            <el-tooltip content="列表视图" placement="top">
+              <button class="pr-view-btn" :class="{ on: rptView === 'list' }" @click="rptView = 'list'">
+                <el-icon><Menu /></el-icon>
+              </button>
+            </el-tooltip>
+          </div>
+          <el-button size="small" :icon="Refresh" circle :loading="rptLoading" @click="loadRptPassRate" />
+        </div>
+      </div>
+
+      <!-- 加载中 -->
+      <div v-if="rptLoading && !rptCurrent" class="pr-empty">加载中...</div>
+
+      <!-- 租户拉取失败 -->
+      <div v-else-if="rptCurrent && !rptCurrent.success" class="pr-empty pr-error">
+        {{ rptCurrent.tenantName || '该租户' }}数据拉取失败：{{ rptCurrent.error || '未知错误' }}
+      </div>
+
+      <!-- 网格视图（截图1样式：模块卡 + 进度条 + 用例/通过/失败） -->
+      <div v-else-if="rptView === 'grid'" class="pr-grid">
+        <div v-for="m in rptCurrent?.modules || []" :key="m.bizModule" class="pr-cell">
+          <div class="pr-cell-name">{{ m.bizModuleLabel }}</div>
+          <div class="pr-cell-bar">
+            <div class="pr-cell-track">
+              <div
+                class="pr-cell-fill"
+                :style="{ width: Math.max(0, Math.min(100, m.passRate)) + '%' }"
+              />
+            </div>
+            <span class="pr-cell-pct">{{ m.passRate.toFixed(2) }}%</span>
+          </div>
+          <div class="pr-cell-stat">用例 {{ m.totalCount }} · 通过 {{ m.passedCount }} · 失败 {{ m.failedCount }}</div>
+        </div>
+        <div v-if="!rptCurrent?.modules?.length" class="pr-empty">暂无模块数据</div>
+      </div>
+
+      <!-- 列表视图（截图2样式：模块名 + 通过率 + 行尾箭头） -->
+      <div v-else class="pr-list">
+        <div v-for="m in rptCurrent?.modules || []" :key="m.bizModule" class="pr-row">
+          <span class="pr-row-name">{{ m.bizModuleLabel }}</span>
+          <span class="pr-row-rate">通过率 {{ m.passRate.toFixed(2) }}%</span>
+          <el-icon class="pr-row-arrow"><ArrowRight /></el-icon>
+        </div>
+        <div v-if="!rptCurrent?.modules?.length" class="pr-empty">暂无模块数据</div>
+      </div>
+    </div>
+
     <div class="dual-row">
       <!-- 活跃项目列表 -->
       <div class="ld-card">
@@ -405,7 +470,7 @@ import { ref, computed, onMounted } from "vue";
 import StatCard from "@/components/StatCard.vue";
 import ProgressBar from "@/components/ProgressBar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Edit, Refresh, Delete } from "@element-plus/icons-vue";
+import { Plus, Edit, Refresh, Delete, Grid, Menu, ArrowRight } from "@element-plus/icons-vue";
 import {
   fetchProjectStat,
   fetchProjectActive,
@@ -426,6 +491,7 @@ import {
   type RequirementDetail,
   type RequirementAuthStatus
 } from "@/api/requirement";
+import { fetchRptPassRate, type RptTenantPassRate } from "@/api/rptStats";
 
 defineOptions({ name: "ProjectView" });
 
@@ -468,6 +534,44 @@ const authStatusCls = computed(() => {
 
 const dialogVisible = ref(false);
 const submitting = ref(false);
+
+// ===== 用例通过率（RPT 平台，盐田/蛇口双租户） =====
+const rptData = ref<RptTenantPassRate[]>([]);
+const rptLoading = ref(false);
+const rptTenant = ref<number>(29); // 默认看盐田
+const rptView = ref<"grid" | "list">("grid");
+
+/** 切换器选项：后端返回租户名如"盐田堆场"，展示用短名 */
+const rptTenants = computed(() =>
+  rptData.value.map(t => ({
+    tenantId: t.tenantId,
+    shortName: (t.tenantName || `租户${t.tenantId}`).replace(/堆场$/, "")
+  }))
+);
+
+/** 当前选中租户的聚合结果 */
+const rptCurrent = computed(() => rptData.value.find(t => t.tenantId === rptTenant.value));
+
+/** 拉取双租户用例通过率（单租户失败由后端聚合为 error 字段，前端原样提示） */
+async function loadRptPassRate() {
+  rptLoading.value = true;
+  try {
+    const res = await fetchRptPassRate();
+    rptData.value = res.data || [];
+    // 首次加载后若默认租户不在返回列表里，自动落到第一个可用租户
+    if (!rptCurrent.value && rptData.value.length) {
+      rptTenant.value = rptData.value[0].tenantId;
+    }
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    rptLoading.value = false;
+  }
+}
+
+function onRptTenantChange() {
+  /* 仅切换展示，无需重新请求（双租户数据已一次拉回） */
+}
 const syncingId = ref<number | null>(null);
 const deletingId = ref<number | null>(null);
 const editingId = ref<number | null>(null);
@@ -1064,7 +1168,10 @@ function syncTagCls(p: any) {
   }
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadRptPassRate();
+});
 </script>
 
 <style scoped lang="scss">
@@ -1090,6 +1197,137 @@ onMounted(load);
 /* 最近提交活动在最下方跨两列 */
 .dual-row > .ld-card:last-child {
   grid-column: 1 / -1;
+}
+
+/* ===== 用例通过率卡片 ===== */
+.pass-rate-card {
+  margin-bottom: 18px;
+}
+.pr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pr-view-toggle {
+  display: flex;
+  gap: 4px;
+}
+.pr-view-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid $border-subtle;
+  border-radius: 6px;
+  background: transparent;
+  color: $text-tertiary;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  &:hover {
+    color: $text-primary;
+    border-color: $text-tertiary;
+  }
+  &.on {
+    color: #fff;
+    background: $accent;
+    border-color: $accent;
+  }
+}
+
+/* 网格视图（截图1）：每模块一张小卡 */
+.pr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+}
+.pr-cell {
+  border: 1px solid $border-subtle;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.pr-cell-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: $text-primary;
+  margin-bottom: 8px;
+}
+.pr-cell-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.pr-cell-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(52, 211, 153, 0.15);
+  overflow: hidden;
+}
+.pr-cell-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #34d399;
+  transition: width 0.4s ease;
+}
+.pr-cell-pct {
+  font-size: 13px;
+  font-weight: 600;
+  color: $text-primary;
+  white-space: nowrap;
+}
+.pr-cell-stat {
+  font-size: 12px;
+  color: $text-tertiary;
+}
+
+/* 列表视图（截图2）：模块名 + 通过率 + 箭头 */
+.pr-list {
+  display: flex;
+  flex-direction: column;
+}
+.pr-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid $border-subtle;
+  cursor: pointer;
+  transition: background 0.15s;
+  &:last-of-type {
+    border-bottom: none;
+  }
+  &:hover {
+    background: rgba(255, 255, 255, 0.03);
+    .pr-row-name {
+      color: $accent;
+    }
+  }
+}
+.pr-row-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: $text-primary;
+  transition: color 0.15s;
+}
+.pr-row-rate {
+  font-size: 13px;
+  color: $text-secondary;
+}
+.pr-row-arrow {
+  margin-left: auto;
+  color: $text-tertiary;
+}
+.pr-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: $text-tertiary;
+}
+.pr-error {
+  color: $color-danger;
 }
 
 .card-head {
