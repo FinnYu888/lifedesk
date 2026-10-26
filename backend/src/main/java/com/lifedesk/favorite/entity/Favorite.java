@@ -34,4 +34,13 @@ public class Favorite extends BaseEntity {
 
     /** 备注/分类，可选 */
     private String description;
+
+    /** 环境标识：test=测试 / integration=集成 / prod=生产（仅 type=link 有意义） */
+    private String env;
+
+    /** CDS 版本：3.0 / 5.0（仅 type=link 有意义；前端红绿区分避免选错） */
+    private String cdsVersion;
+
+    /** 网页截图 URL，可选；为空时前端兜底用公开截图服务 mShots 自动生成 */
+    private String screenshot;
 }
