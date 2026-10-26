@@ -447,38 +447,38 @@ function linkStyle(i: number) {
   const n = links.value.length;
   const offset = i - currentLinkIdx.value;
   const abs = Math.abs(offset);
-  // cover flow 排布：左右展开 + 侧面旋转 + 远处下沉
-  let x = offset * 220;
+  // cover flow 排布：左右展开 + 侧面旋转 + 远处下沉（更紧凑的间距）
+  let x = offset * 175;
   let y = 0;
-  let z = -abs * 110;
-  let scale = Math.max(0.62, 1 - abs * 0.13);
-  let rot = offset * -38;  // 左侧卡 rotateY 正（向右转）、右侧卡负
+  let z = -abs * 85;
+  let scale = Math.max(0.64, 1 - abs * 0.13);
+  let rot = offset * -36;  // 左侧卡 rotateY 正（向右转）、右侧卡负
   let zIdx = 100 - abs;
-  let opacity = Math.max(0.35, 1 - abs * 0.18);
+  let opacity = Math.max(0.38, 1 - abs * 0.18);
 
   // 鼠标 hover 弹起：该卡大幅前移 + 放大；其他卡维持
   if (hoverIdx.value === i) {
-    z = z + 90;
-    scale = Math.max(scale, 1.12);
-    y = -10;
+    z = z + 80;
+    scale = Math.max(scale, 1.1);
+    y = -8;
     rot = rot * 0.25;  // hover 时旋转减弱（更正面展示）
     zIdx = 1000;
   }
 
   // 拖拽中心卡抽出
   if (dragging.value && dragIdx.value === i) {
-    x = offset * 220 + dragDeltaX.value;
-    z = 140;
-    scale = 1.15;
-    y = -16;
+    x = offset * 175 + dragDeltaX.value;
+    z = 130;
+    scale = 1.12;
+    y = -14;
     rot = dragDeltaX.value * 0.18;
     zIdx = 2000;
   } else if (dragging.value && dragIdx.value === currentLinkIdx.value) {
     // 后方卡（非中心）按重量 abs 下沉
     const weight = abs * 0.45 + 0.2;
     const dragAbs = Math.abs(dragDeltaX.value);
-    y = dragAbs * weight * 0.35;
-    z = -abs * 110 - dragAbs * weight * 0.12;
+    y = dragAbs * weight * 0.32;
+    z = -abs * 85 - dragAbs * weight * 0.12;
     scale = Math.max(0.5, scale - dragAbs * weight * 0.0006);
   }
 
@@ -499,34 +499,34 @@ function noteStyle(i: number) {
   const n = notes.value.length;
   const offset = i - currentNoteIdx.value;
   const abs = Math.abs(offset);
-  let x = offset * 200;
+  let x = offset * 160;
   let y = 0;
-  let z = -abs * 100;
+  let z = -abs * 78;
   let scale = Math.max(0.66, 1 - abs * 0.12);
-  let rot = offset * -36;
+  let rot = offset * -34;
   let zIdx = 100 - abs;
   let opacity = Math.max(0.4, 1 - abs * 0.16);
 
   if (hoverNoteIdx.value === i) {
-    z = z + 80;
-    scale = Math.max(scale, 1.1);
-    y = -8;
+    z = z + 70;
+    scale = Math.max(scale, 1.08);
+    y = -6;
     rot = rot * 0.25;
     zIdx = 1000;
   }
 
   if (draggingNote.value && dragNoteIdx.value === i) {
-    x = offset * 200 + dragNoteDeltaX.value;
-    z = 140;
-    scale = 1.12;
-    y = -14;
+    x = offset * 160 + dragNoteDeltaX.value;
+    z = 125;
+    scale = 1.1;
+    y = -12;
     rot = dragNoteDeltaX.value * 0.18;
     zIdx = 2000;
   } else if (draggingNote.value && dragNoteIdx.value === currentNoteIdx.value) {
     const weight = abs * 0.45 + 0.2;
     const dragAbs = Math.abs(dragNoteDeltaX.value);
-    y = dragAbs * weight * 0.35;
-    z = -abs * 100 - dragAbs * weight * 0.12;
+    y = dragAbs * weight * 0.32;
+    z = -abs * 78 - dragAbs * weight * 0.12;
     scale = Math.max(0.55, scale - dragAbs * weight * 0.0006);
   }
 
@@ -856,11 +856,11 @@ onBeforeUnmount(() => {
 .pane-body {
   flex: 1;
   overflow: hidden;
-  padding: 18px 18px 24px;
+  padding: 14px 18px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;  /* 改为垂直居中：轮播图位于所属区域中间部位 */
 }
 .empty {
   text-align: center;
@@ -869,18 +869,18 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-/* ========== 3D 立体堆叠容器 ========== */
+/* ========== 3D 立体堆叠容器（更紧凑） ========== */
 .card-stack {
   position: relative;
   width: 100%;
-  max-width: 420px;
-  height: 380px;
+  max-width: 340px;  /* 420 → 340，更紧凑 */
+  height: 320px;     /* 380 → 320 */
   perspective: 1400px;
   perspective-origin: 50% 60%;
   transform-style: preserve-3d;
 }
 .note-stack {
-  height: 320px;
+  height: 260px;     /* 320 → 260 */
 }
 
 /* ========== 轮播卡片（共享样式） ========== */
@@ -888,9 +888,9 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 0;
   left: 50%;
-  margin-left: -180px;  /* 卡宽 360 / 2 */
-  width: 360px;
-  border-radius: 18px;
+  margin-left: -150px;  /* 卡宽 300 / 2 */
+  width: 300px;         /* 360 → 300，更紧凑 */
+  border-radius: 16px;
   backface-visibility: hidden;
   cursor: pointer;
   user-select: none;
@@ -919,14 +919,14 @@ onBeforeUnmount(() => {
 
 /* ========== 收藏卡片 ========== */
 .link-card {
-  height: 320px;
+  height: 280px;       /* 320 → 280 */
   display: flex;
   flex-direction: column;
 }
 .screenshot {
   position: relative;
   width: 100%;
-  height: 180px;
+  height: 150px;       /* 180 → 150 */
   background: rgba(0, 0, 0, 0.25);
   overflow: hidden;
   border-bottom: 1px solid $border-subtle;
@@ -950,13 +950,13 @@ onBeforeUnmount(() => {
 }
 .info {
   flex: 1;
-  padding: 12px 16px 8px;
+  padding: 10px 14px 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 .name {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: $text-primary;
   white-space: nowrap;
@@ -964,7 +964,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 .url {
-  font-size: 11px;
+  font-size: 10px;
   color: $accent-light;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: nowrap;
@@ -974,12 +974,12 @@ onBeforeUnmount(() => {
 .tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
   margin-top: 4px;
 }
 .tag {
   font-size: 10px;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: 8px;
   font-weight: 600;
   letter-spacing: 0.3px;
@@ -1000,22 +1000,40 @@ onBeforeUnmount(() => {
   background: rgba(107, 114, 128, 0.5);
   color: $text-primary;
 }
-/* 环境标识：测试青绿 / 集成橙黄 / 生产红 */
+/* 环境标识：测试青绿 / 集成橙黄 / 生产红 —— 字体颜色更饱和 + 小圆点 + 加粗，一眼可辨 */
+.tag.env {
+  font-size: 11px;
+  padding: 3px 9px 3px 7px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  letter-spacing: 0.4px;
+  &::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 4px currentColor;
+  }
+}
 .env.env-test {
-  background: rgba(45, 212, 191, 0.18);
-  color: #5eead4;
-  border: 1px solid rgba(45, 212, 191, 0.4);
+  background: rgba(45, 212, 191, 0.22);
+  color: #2dd4bf;       /* 更饱和的青绿 */
+  border: 1px solid rgba(45, 212, 191, 0.55);
 }
 .env.env-integration {
-  background: rgba(251, 191, 36, 0.18);
-  color: #fcd34d;
-  border: 1px solid rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.22);
+  color: #fbbf24;      /* 更饱和的橙黄 */
+  border: 1px solid rgba(251, 191, 36, 0.55);
 }
 .env.env-prod {
-  background: rgba(248, 113, 113, 0.22);
-  color: #fca5a5;
-  border: 1px solid rgba(248, 113, 113, 0.5);
-  font-weight: 700;
+  background: rgba(239, 68, 68, 0.26);
+  color: #f87171;      /* 更饱和的红 */
+  border: 1px solid rgba(239, 68, 68, 0.6);
+  font-weight: 800;
 }
 .tag.desc {
   background: rgba(167, 139, 250, 0.12);
@@ -1023,17 +1041,17 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(167, 139, 250, 0.18);
 }
 
-/* ========== 左右轮播箭头按钮 ========== */
+/* ========== 左右轮播箭头按钮（更靠边 + hover 更明显 + 防误点热区） ========== */
 .arrow-btn {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: rgba(20, 14, 38, 0.7);
-  border: 1px solid $border-glass;
-  color: $text-secondary;
+  background: rgba(20, 14, 38, 0.6);
+  border: 1px solid rgba(196, 181, 253, 0.22);
+  color: rgba(196, 181, 253, 0.75);
   font-size: 18px;
   cursor: pointer;
   z-index: 1500;
@@ -1041,23 +1059,35 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   backdrop-filter: blur(8px);
-  transition: all 0.18s;
+  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* 防误点：用伪元素把按钮的有效点击热区扩大到 88x88（按钮周围 22px 内均归按钮捕获，
+     避免误点击到按钮下方/旁边的卡片导致选错卡片） */
+  &::before {
+    content: '';
+    position: absolute;
+    inset: -22px;       /* 热区扩展 22px → 总热区 88x88 */
+    border-radius: 50%;
+    cursor: pointer;
+    /* 透明，不影响视觉 */
+  }
   &:hover {
-    color: $text-primary;
-    border-color: $border-accent;
-    background: rgba(167, 139, 250, 0.18);
-    box-shadow: 0 0 16px rgba(167, 139, 250, 0.35);
-    transform: translateY(-50%) scale(1.08);
+    color: #fff;
+    border-color: rgba(196, 181, 253, 0.95);
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.45), rgba(196, 181, 253, 0.32));
+    box-shadow: 0 0 24px rgba(167, 139, 250, 0.6),
+                0 0 0 2px rgba(196, 181, 253, 0.55),
+                inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    transform: translateY(-50%) scale(1.18);
   }
   &:active {
     transform: translateY(-50%) scale(0.95);
   }
 }
 .arrow-left {
-  left: 8px;
+  left: 0;            /* 8px → 0，更靠边 */
 }
 .arrow-right {
-  right: 8px;
+  right: 0;           /* 8px → 0，更靠边 */
 }
 
 .card-actions {
@@ -1097,8 +1127,8 @@ onBeforeUnmount(() => {
 
 /* ========== 笔记卡片 ========== */
 .note-card {
-  height: 140px;
-  padding: 14px 18px;
+  height: 120px;       /* 140 → 120，更紧凑 */
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1110,10 +1140,10 @@ onBeforeUnmount(() => {
 }
 .note-icon {
   color: $accent-light;
-  font-size: 16px;
+  font-size: 15px;
 }
 .note-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: $text-primary;
   white-space: nowrap;
