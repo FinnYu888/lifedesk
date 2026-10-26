@@ -1,11 +1,20 @@
 import { http } from "@/utils/http";
 
+export type FavoriteEnv = "test" | "integration" | "prod";
+export type CdsVersion = "3.0" | "5.0";
+
 export interface Favorite {
   id?: number;
   name: string;
   value: string;
   type: "link" | "note";
   description?: string;
+  /** 环境：test=测试 / integration=集成 / prod=生产（仅 type=link 有意义） */
+  env?: FavoriteEnv | string;
+  /** CDS 版本：3.0 / 5.0（仅 type=link 有意义，红绿区分避免选错） */
+  cdsVersion?: CdsVersion | string;
+  /** 网页截图 URL，可选；为空时前端兜底用公开截图服务 mShots 自动生成 */
+  screenshot?: string;
   createTime?: string;
   updateTime?: string;
 }

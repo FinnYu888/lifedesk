@@ -45,6 +45,13 @@ public class DatabaseMigration implements ApplicationRunner {
         put("sync_error", "VARCHAR(500) DEFAULT NULL COMMENT '最近一次同步失败错误信息'");
     }};
 
+    /** favorite 表增量字段清单：列名 → 列定义（用于收藏卡片展示环境/CDS版本/网页截图） */
+    private static final Map<String, String> FAVORITE_NEW_COLUMNS = new LinkedHashMap<String, String>() {{
+        put("env", "VARCHAR(16) DEFAULT NULL COMMENT '环境：test/integration/prod'");
+        put("cds_version", "VARCHAR(8) DEFAULT NULL COMMENT 'CDS 版本：3.0/5.0'");
+        put("screenshot", "VARCHAR(500) DEFAULT NULL COMMENT '网页截图 URL（可选）'");
+    }};
+
     /** 其他表字段长度升级清单：表 → (列 → 列定义)。用于把已存在的窄字段升级为更宽字段 */
     private static final Map<String, Map<String, String>> COLUMN_TYPE_UPGRADES = new LinkedHashMap<String, Map<String, String>>() {{
         put("commit_activity", new LinkedHashMap<String, String>() {{
@@ -65,6 +72,7 @@ public class DatabaseMigration implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         migrateProjectColumns();
+        migrateFavoriteColumns();
         upgradeColumnTypes();
         fixProjectNullTimestamps();
     }
@@ -84,6 +92,23 @@ public class DatabaseMigration implements ApplicationRunner {
             }
         } catch (Exception ex) {
             log.warn("[DBMigration] project 表迁移失败（忽略，可能表还未创建）：{}", ex.getMessage());
+        }
+    }
+
+    /** 给 favorite 表补缺失字段（env / cds_version / screenshot） */
+    private void migrateFavoriteColumns() {
+        try (Connection conn = jdbcTemplate.getDataSource().getConnection()) {
+            DatabaseMetaData meta = conn.getMetaData();
+            for (Map.Entry<String, String> e : FAVORITE_NEW_COLUMNS.entrySet()) {
+                String column = e.getKey();
+                if (!columnExists(meta, "favorite", column)) {
+                    String sql = "ALTER TABLE favorite ADD COLUMN " + column + " " + e.getValue();
+                    log.info("[DBMigration] 补字段：{}", sql);
+                    jdbcTemplate.execute(sql);
+                }
+            }
+        } catch (Exception ex) {
+            log.warn("[DBMigration] favorite 表迁移失败（忽略，可能表还未创建）：{}", ex.getMessage());
         }
     }
 
