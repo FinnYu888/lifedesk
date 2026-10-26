@@ -344,7 +344,7 @@ const notes = ref<Favorite[]>([]);
 const hoverIdx = ref(-1);
 const dragIdx = ref(-1);
 const dragStartX = ref(0);
-const dragDeltaX = ref(0);
+const dragDeltaX = ref(0);          // 拖拽+惯性过程中的连续像素位置（往右为正）
 const dragging = ref(false);
 const detailIdx = ref(-1);
 const imgLoaded = ref<Record<number, boolean>>({});
@@ -352,6 +352,11 @@ const imgLoaded = ref<Record<number, boolean>>({});
 const currentLinkIdx = ref(0);
 let autoLinkTimer: any = null;
 const AUTO_INTERVAL = 3500;
+// 惯性滑动状态：true 时 linkStyle 用 dragDeltaX 计算 offset，transition: none
+const inertiaLinkRunning = ref(false);
+// 拖拽速度历史（最近几帧的 {t, x}），用于松手时算速度
+let linkDragHistory: { t: number; x: number }[] = [];
+let linkInertiaRAF: number | null = null;
 
 // ===== 笔记：3D 轮播交互状态 =====
 const hoverNoteIdx = ref(-1);
@@ -362,6 +367,9 @@ const draggingNote = ref(false);
 const detailNoteIdx = ref(-1);
 const currentNoteIdx = ref(0);
 let autoNoteTimer: any = null;
+const inertiaNoteRunning = ref(false);
+let noteDragHistory: { t: number; x: number }[] = [];
+let noteInertiaRAF: number | null = null;
 
 // ===== 编辑弹窗 =====
 const dialogVisible = ref(false);
@@ -445,47 +453,46 @@ function envLabel(env: string): string {
 // ===== 立体轮播（cover flow）transform 计算 =====
 // offset = i - currentIdx（相对中心的偏移，左侧为负、右侧为正）
 // 卡片按 offset 做 translateX + rotateY + translateZ + scale，形成左右立体轮播
+// 关键：规整 offset 到 [-n/2, n/2] 范围，实现首位相连循环
+// （最后一张往后切换时，第一张从右侧远处平滑滑入中心，而非全员大跳变）
+function normalizeOffset(rawOffset: number, n: number): number {
+  if (n <= 0) return 0;
+  // 把 offset 规整到 [-n/2, n/2) 范围（半开区间，避免 n/2 与 -n/2 重合）
+  let o = rawOffset;
+  while (o > n / 2) o -= n;
+  while (o <= -n / 2) o += n;
+  return o;
+}
+
 function linkStyle(i: number) {
   const n = links.value.length;
-  const offset = i - currentLinkIdx.value;
+  // 拖拽/惯性过程中的连续偏移（dragDeltaX 单位：像素；正值=往右拖）
+  const dragOffsetCards =
+    dragging.value || inertiaLinkRunning.value ? dragDeltaX.value / 260 : 0;
+  const rawOffset = i - currentLinkIdx.value - dragOffsetCards;
+  // 规整到 [-n/2, n/2]，实现循环（最后一张→第一张平滑过渡）
+  const offset = normalizeOffset(rawOffset, n);
   const abs = Math.abs(offset);
-  // cover flow 排布：左右展开 + 侧面旋转 + 远处下沉（卡片加大后间距相应放大）
-  let x = offset * 200;
+  // cover flow 排布：左右展开 + 侧面旋转 + 远处下沉（间距 +30%）
+  let x = offset * 260;
   let y = 0;
-  let z = -abs * 95;
-  let scale = Math.max(0.64, 1 - abs * 0.13);
-  let rot = offset * -36;  // 左侧卡 rotateY 正（向右转）、右侧卡负
-  let zIdx = 100 - abs;
-  let opacity = Math.max(0.38, 1 - abs * 0.18);
+  let z = -abs * 124;
+  let scale = Math.max(0.62, 1 - abs * 0.13);
+  let rot = offset * -36;
+  let zIdx = 100 - Math.floor(abs);
+  let opacity = Math.max(0.36, 1 - abs * 0.18);
 
-  // 鼠标 hover 弹起：该卡大幅前移 + 放大；其他卡维持
-  if (hoverIdx.value === i) {
+  // 鼠标 hover 弹起：该卡大幅前移 + 放大
+  if (hoverIdx.value === i && !dragging.value && !inertiaLinkRunning.value) {
     z = z + 90;
     scale = Math.max(scale, 1.12);
     y = -10;
-    rot = rot * 0.25;  // hover 时旋转减弱（更正面展示）
+    rot = rot * 0.25;
     zIdx = 1000;
   }
 
-  // 拖拽中心卡抽出
-  if (dragging.value && dragIdx.value === i) {
-    x = offset * 200 + dragDeltaX.value;
-    z = 140;
-    scale = 1.15;
-    y = -16;
-    rot = dragDeltaX.value * 0.18;
-    zIdx = 2000;
-  } else if (dragging.value && dragIdx.value === currentLinkIdx.value) {
-    // 后方卡（非中心）按重量 abs 下沉
-    const weight = abs * 0.45 + 0.2;
-    const dragAbs = Math.abs(dragDeltaX.value);
-    y = dragAbs * weight * 0.35;
-    z = -abs * 95 - dragAbs * weight * 0.12;
-    scale = Math.max(0.5, scale - dragAbs * weight * 0.0006);
-  }
-
   const transitionMode =
-    (dragging.value && dragIdx.value === i)
+    (dragging.value && dragIdx.value === i) || inertiaLinkRunning.value
       ? "none"
       : "transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s, opacity 0.4s";
 
@@ -499,17 +506,20 @@ function linkStyle(i: number) {
 
 function noteStyle(i: number) {
   const n = notes.value.length;
-  const offset = i - currentNoteIdx.value;
+  const dragOffsetCards =
+    draggingNote.value || inertiaNoteRunning.value ? dragNoteDeltaX.value / 234 : 0;
+  const rawOffset = i - currentNoteIdx.value - dragOffsetCards;
+  const offset = normalizeOffset(rawOffset, n);
   const abs = Math.abs(offset);
-  let x = offset * 180;
+  let x = offset * 234;
   let y = 0;
-  let z = -abs * 88;
-  let scale = Math.max(0.66, 1 - abs * 0.12);
+  let z = -abs * 114;
+  let scale = Math.max(0.64, 1 - abs * 0.12);
   let rot = offset * -34;
-  let zIdx = 100 - abs;
-  let opacity = Math.max(0.4, 1 - abs * 0.16);
+  let zIdx = 100 - Math.floor(abs);
+  let opacity = Math.max(0.38, 1 - abs * 0.16);
 
-  if (hoverNoteIdx.value === i) {
+  if (hoverNoteIdx.value === i && !draggingNote.value && !inertiaNoteRunning.value) {
     z = z + 80;
     scale = Math.max(scale, 1.1);
     y = -8;
@@ -517,23 +527,8 @@ function noteStyle(i: number) {
     zIdx = 1000;
   }
 
-  if (draggingNote.value && dragNoteIdx.value === i) {
-    x = offset * 180 + dragNoteDeltaX.value;
-    z = 130;
-    scale = 1.12;
-    y = -14;
-    rot = dragNoteDeltaX.value * 0.18;
-    zIdx = 2000;
-  } else if (draggingNote.value && dragNoteIdx.value === currentNoteIdx.value) {
-    const weight = abs * 0.45 + 0.2;
-    const dragAbs = Math.abs(dragNoteDeltaX.value);
-    y = dragAbs * weight * 0.32;
-    z = -abs * 88 - dragAbs * weight * 0.12;
-    scale = Math.max(0.55, scale - dragAbs * weight * 0.0006);
-  }
-
   const transitionMode =
-    (draggingNote.value && dragNoteIdx.value === i)
+    (draggingNote.value && dragNoteIdx.value === i) || inertiaNoteRunning.value
       ? "none"
       : "transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s, opacity 0.4s";
 
@@ -606,7 +601,7 @@ function onNoteStackLeave() {
   startNoteAuto();
 }
 
-// ===== 收藏：点击 & 拖拽处理 =====
+// ===== 收藏：点击 & 拖拽处理（含抛惯性滑动） =====
 function onLinkClick(e: MouseEvent, item: Favorite, i: number) {
   // 拖拽中或刚结束拖拽的点击忽略
   if (dragging.value || Math.abs(dragDeltaX.value) > 5) return;
@@ -621,15 +616,20 @@ function onLinkClick(e: MouseEvent, item: Favorite, i: number) {
   openLink(item);
 }
 
+// 速度阈值：松手时最近 100ms 内的平均速度 > FLICK_VELOCITY px/ms 视为"抛"
+const FLICK_VELOCITY = 0.5;
+// 卡片间距（与 linkStyle 的 offset * 260 一致）
+const LINK_SPACING = 260;
+
 function onLinkPointerDown(e: PointerEvent, i: number) {
-  // 仅中心卡可拖拽抽出
+  // 仅中心卡可拖拽
   if (i !== currentLinkIdx.value) return;
   if (detailIdx.value >= 0) return;
   dragIdx.value = i;
   dragStartX.value = e.clientX;
   dragDeltaX.value = 0;
   dragging.value = true;
-  // 捕获指针，确保 pointermove/up 都能收到
+  linkDragHistory = [{ t: performance.now(), x: e.clientX }];
   (e.target as Element).setPointerCapture?.(e.pointerId);
   window.addEventListener("pointermove", onLinkPointerMove);
   window.addEventListener("pointerup", onLinkPointerUp);
@@ -638,6 +638,13 @@ function onLinkPointerDown(e: PointerEvent, i: number) {
 function onLinkPointerMove(e: PointerEvent) {
   if (!dragging.value) return;
   dragDeltaX.value = e.clientX - dragStartX.value;
+  // 记录速度历史（最近 6 帧）
+  const now = performance.now();
+  linkDragHistory.push({ t: now, x: e.clientX });
+  // 只保留最近 120ms 的样本
+  while (linkDragHistory.length > 6 && now - linkDragHistory[0].t > 120) {
+    linkDragHistory.shift();
+  }
 }
 
 function onLinkPointerUp() {
@@ -645,32 +652,78 @@ function onLinkPointerUp() {
   window.removeEventListener("pointerup", onLinkPointerUp);
   if (!dragging.value) return;
   dragging.value = false;
+
+  // 计算松手速度（最近 100ms 内的平均速度）
+  const last = linkDragHistory[linkDragHistory.length - 1];
+  const first = linkDragHistory[0];
+  const dt = last && first ? last.t - first.t : 0;
+  const dx = last && first ? last.x - first.x : 0;
+  const velocity = dt > 0 ? dx / dt : 0;  // px/ms
+
   const dist = Math.abs(dragDeltaX.value);
+
+  if (Math.abs(velocity) >= FLICK_VELOCITY) {
+    // 快速抛出 → 惯性滑动
+    // 惯性距离 = 速度 * 衰减时间（约 600ms 衰减）
+    const inertiaDist = velocity * 600;
+    // 总位移 = 当前 dragDeltaX + 惯性距离
+    const totalDelta = dragDeltaX.value + inertiaDist;
+    // 目标卡片数（四舍五入；负数表示往左切，正数往右切）
+    // 注意：dragDeltaX 正值 = 往右拖 = 切换到上一张（currentIdx - cards）
+    const targetCards = Math.round(-totalDelta / LINK_SPACING);
+    startLinkInertia(targetCards);
+    return;
+  }
+
+  // 慢速拖拽 → 原逻辑：≥ 阈值抽出详情，否则弹回
   if (dist >= DRAG_THRESHOLD) {
-    // 展开详情
     detailIdx.value = dragIdx.value;
   }
-  // 弹簧回弹：清空 dragDeltaX，触发 cubic-bezier(0.34, 1.56, 0.64, 1) 过渡
-  // 用 setTimeout 让 transition 重新激活（dragIdx 重置后 transition 生效）
   const idx = dragIdx.value;
   dragIdx.value = -1;
-  setTimeout(() => {
-    dragDeltaX.value = 0;
-  }, 0);
-  // detailIdx 已设则保留
-  if (detailIdx.value < 0) {
-    // 未达阈值，记录一次"刚拖过"防 click
-    setTimeout(() => {
-      // no-op, click handler 已检查
-    }, 0);
+  // 弹回：dragDeltaX → 0（让 cubic-bezier 过冲过渡生效）
+  dragDeltaX.value = 0;
+  linkDragHistory = [];
+}
+
+// 惯性滑动动画：让 dragDeltaX 从当前值平滑变到 -targetCards * SPACING（即切换 currentIdx）
+function startLinkInertia(targetCards: number) {
+  if (linkInertiaRAF) cancelAnimationFrame(linkInertiaRAF);
+  const startDelta = dragDeltaX.value;
+  const endDelta = -targetCards * LINK_SPACING;
+  const duration = 700;  // ms
+  const startT = performance.now();
+  inertiaLinkRunning.value = true;
+  dragIdx.value = -1;
+
+  function step(now: number) {
+    const elapsed = now - startT;
+    const t = Math.min(1, elapsed / duration);
+    // ease-out cubic：先快后慢，模拟惯性衰减
+    const eased = 1 - Math.pow(1 - t, 3);
+    dragDeltaX.value = startDelta + (endDelta - startDelta) * eased;
+    if (t < 1) {
+      linkInertiaRAF = requestAnimationFrame(step);
+    } else {
+      // 动画结束：currentIdx 推进 targetCards（循环 mod n），dragDeltaX 归零
+      const n = links.value.length;
+      if (n > 0) {
+        currentLinkIdx.value = ((currentLinkIdx.value + targetCards) % n + n) % n;
+      }
+      dragDeltaX.value = 0;
+      inertiaLinkRunning.value = false;
+      linkInertiaRAF = null;
+      linkDragHistory = [];
+    }
   }
+  linkInertiaRAF = requestAnimationFrame(step);
 }
 
 function closeDetail() {
   detailIdx.value = -1;
 }
 
-// ===== 笔记：点击 & 拖拽处理 =====
+// ===== 笔记：点击 & 拖拽处理（含抛惯性滑动） =====
 function onNoteClick(e: MouseEvent, item: Favorite, i: number) {
   if (draggingNote.value || Math.abs(dragNoteDeltaX.value) > 5) return;
   if (detailNoteIdx.value >= 0) return;
@@ -683,6 +736,8 @@ function onNoteClick(e: MouseEvent, item: Favorite, i: number) {
   detailNoteIdx.value = i;
 }
 
+const NOTE_SPACING = 234;
+
 function onNotePointerDown(e: PointerEvent, i: number) {
   if (i !== currentNoteIdx.value) return;
   if (detailNoteIdx.value >= 0) return;
@@ -690,6 +745,7 @@ function onNotePointerDown(e: PointerEvent, i: number) {
   dragNoteStartX.value = e.clientX;
   dragNoteDeltaX.value = 0;
   draggingNote.value = true;
+  noteDragHistory = [{ t: performance.now(), x: e.clientX }];
   (e.target as Element).setPointerCapture?.(e.pointerId);
   window.addEventListener("pointermove", onNotePointerMove);
   window.addEventListener("pointerup", onNotePointerUp);
@@ -698,6 +754,11 @@ function onNotePointerDown(e: PointerEvent, i: number) {
 function onNotePointerMove(e: PointerEvent) {
   if (!draggingNote.value) return;
   dragNoteDeltaX.value = e.clientX - dragNoteStartX.value;
+  const now = performance.now();
+  noteDragHistory.push({ t: now, x: e.clientX });
+  while (noteDragHistory.length > 6 && now - noteDragHistory[0].t > 120) {
+    noteDragHistory.shift();
+  }
 }
 
 function onNotePointerUp() {
@@ -705,14 +766,62 @@ function onNotePointerUp() {
   window.removeEventListener("pointerup", onNotePointerUp);
   if (!draggingNote.value) return;
   draggingNote.value = false;
+
+  // 计算松手速度
+  const last = noteDragHistory[noteDragHistory.length - 1];
+  const first = noteDragHistory[0];
+  const dt = last && first ? last.t - first.t : 0;
+  const dx = last && first ? last.x - first.x : 0;
+  const velocity = dt > 0 ? dx / dt : 0;
+
   const dist = Math.abs(dragNoteDeltaX.value);
+
+  if (Math.abs(velocity) >= FLICK_VELOCITY) {
+    // 快速抛出 → 惯性滑动
+    const inertiaDist = velocity * 600;
+    const totalDelta = dragNoteDeltaX.value + inertiaDist;
+    const targetCards = Math.round(-totalDelta / NOTE_SPACING);
+    startNoteInertia(targetCards);
+    return;
+  }
+
+  // 慢速拖拽 → 原逻辑
   if (dist >= DRAG_THRESHOLD) {
     detailNoteIdx.value = dragNoteIdx.value;
   }
   dragNoteIdx.value = -1;
-  setTimeout(() => {
-    dragNoteDeltaX.value = 0;
-  }, 0);
+  dragNoteDeltaX.value = 0;
+  noteDragHistory = [];
+}
+
+function startNoteInertia(targetCards: number) {
+  if (noteInertiaRAF) cancelAnimationFrame(noteInertiaRAF);
+  const startDelta = dragNoteDeltaX.value;
+  const endDelta = -targetCards * NOTE_SPACING;
+  const duration = 700;
+  const startT = performance.now();
+  inertiaNoteRunning.value = true;
+  dragNoteIdx.value = -1;
+
+  function step(now: number) {
+    const elapsed = now - startT;
+    const t = Math.min(1, elapsed / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    dragNoteDeltaX.value = startDelta + (endDelta - startDelta) * eased;
+    if (t < 1) {
+      noteInertiaRAF = requestAnimationFrame(step);
+    } else {
+      const n = notes.value.length;
+      if (n > 0) {
+        currentNoteIdx.value = ((currentNoteIdx.value + targetCards) % n + n) % n;
+      }
+      dragNoteDeltaX.value = 0;
+      inertiaNoteRunning.value = false;
+      noteInertiaRAF = null;
+      noteDragHistory = [];
+    }
+  }
+  noteInertiaRAF = requestAnimationFrame(step);
 }
 
 function closeNoteDetail() {
@@ -789,6 +898,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointerup", onLinkPointerUp);
   window.removeEventListener("pointermove", onNotePointerMove);
   window.removeEventListener("pointerup", onNotePointerUp);
+  if (linkInertiaRAF) cancelAnimationFrame(linkInertiaRAF);
+  if (noteInertiaRAF) cancelAnimationFrame(noteInertiaRAF);
   stopLinkAuto();
   stopNoteAuto();
 });
@@ -877,32 +988,32 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-/* ========== 3D 立体堆叠容器（卡片加大） ========== */
+/* ========== 3D 立体堆叠容器（卡片再加大 30%） ========== */
 .card-stack {
   position: relative;
   width: 100%;
-  max-width: 380px;   /* 340 → 380，配合卡片加大 */
-  height: 350px;      /* 320 → 350 */
-  perspective: 1400px;
+  max-width: 494px;    /* 380 → 494（+30%） */
+  height: 455px;       /* 350 → 455 */
+  perspective: 1600px;  /* 卡片加大，透视距离同步加大避免畸变 */
   perspective-origin: 50% 55%;
   transform-style: preserve-3d;
-  /* --btn-top：按钮垂直位置，收藏默认在 info 区（卡片下半截） */
-  --btn-top: 215px;
+  /* --btn-top：按钮垂直位置，收藏默认在 info 区（卡片下半截，约 65% 处） */
+  --btn-top: 295px;    /* 215 → 295，配合卡片高度 403 的下半截 */
 }
 .note-stack {
-  height: 280px;     /* 260 → 280 */
-  /* 笔记按钮居中到卡片中部（卡片高 140 / 2 = 70px） */
-  --btn-top: 70px;
+  height: 364px;       /* 280 → 364 */
+  /* 笔记按钮居中到卡片中部（卡片高 182 / 2 = 91px） */
+  --btn-top: 91px;     /* 70 → 91 */
 }
 
-/* ========== 轮播卡片（共享样式，加大尺寸） ========== */
+/* ========== 轮播卡片（共享样式，加大 30%） ========== */
 .stack-card {
   position: absolute;
   top: 0;
   left: 50%;
-  margin-left: -170px;  /* 卡宽 340 / 2 */
-  width: 340px;         /* 300 → 340 */
-  border-radius: 16px;
+  margin-left: -221px;  /* 卡宽 442 / 2 */
+  width: 442px;         /* 340 → 442 */
+  border-radius: 18px;  /* 16 → 18，配合卡片加大 */
   backface-visibility: hidden;
   cursor: pointer;
   user-select: none;
@@ -910,17 +1021,17 @@ onBeforeUnmount(() => {
   /* 玻璃风：半透明 + 内高光 */
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
   border: 1px solid $border-glass;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   overflow: hidden;
   will-change: transform, opacity;
 }
 /* 中心卡：边框高亮 + 阴影更亮，强调"当前展示" */
 .stack-card.center {
   border-color: $border-accent;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5),
-              0 0 0 1px rgba(196, 181, 253, 0.25),
-              0 0 28px rgba(167, 139, 250, 0.25),
-              inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.55),
+              0 0 0 1px rgba(196, 181, 253, 0.28),
+              0 0 34px rgba(167, 139, 250, 0.3),
+              inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 .stack-card.dim {
   filter: brightness(0.55) saturate(0.7);
@@ -929,16 +1040,16 @@ onBeforeUnmount(() => {
   cursor: grabbing;
 }
 
-/* ========== 收藏卡片 ========== */
+/* ========== 收藏卡片（加大 30%） ========== */
 .link-card {
-  height: 310px;       /* 280 → 310 */
+  height: 403px;       /* 310 → 403 */
   display: flex;
   flex-direction: column;
 }
 .screenshot {
   position: relative;
   width: 100%;
-  height: 170px;      /* 150 → 170 */
+  height: 221px;      /* 170 → 221 */
   background: rgba(0, 0, 0, 0.25);
   overflow: hidden;
   border-bottom: 1px solid $border-subtle;
@@ -1157,10 +1268,10 @@ onBeforeUnmount(() => {
   }
 }
 
-/* ========== 笔记卡片 ========== */
+/* ========== 笔记卡片（加大 30%） ========== */
 .note-card {
-  height: 140px;       /* 120 → 140，适当加大 */
-  padding: 14px 16px;
+  height: 182px;       /* 140 → 182 */
+  padding: 16px 20px;  /* 14x16 → 16x20，配合卡片加大 */
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1168,14 +1279,14 @@ onBeforeUnmount(() => {
 .note-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .note-icon {
   color: $accent-light;
-  font-size: 15px;
+  font-size: 18px;     /* 15 → 18 */
 }
 .note-title {
-  font-size: 13px;
+  font-size: 15px;     /* 13 → 15 */
   font-weight: 600;
   color: $text-primary;
   white-space: nowrap;
@@ -1186,17 +1297,17 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
 }
 .note-tag {
-  font-size: 10px;
+  font-size: 11px;
   color: $text-tertiary;
   background: rgba(167, 139, 250, 0.08);
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 8px;
 }
 .note-time {
-  font-size: 11px;
+  font-size: 12px;
   color: $text-tertiary;
 }
 
