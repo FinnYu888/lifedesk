@@ -20,19 +20,20 @@
           <span>{{ item.label }}</span>
         </router-link>
 
-        <!-- 自定义菜单：用户自行添加的外部网站（iframe 嵌入当前系统） -->
+        <!-- 自定义菜单：用户自行添加的外部网站（iframe 嵌入当前系统）
+             点击打开为 tab，多个 tab 不互相覆盖；已打开的菜单再点 → 自动定位到该 tab -->
         <div class="nav-title">自定义</div>
-        <router-link
+        <div
           v-for="m in customMenus"
           :key="m.id"
-          :to="{ path: '/custom', query: { id: String(m.id), name: m.name, url: m.url } }"
           class="nav-item custom-nav-item"
-          :class="{ 'nav-item-active': isCurrentMenu(m) }"
+          :class="{ 'nav-item-active': isTabActiveFor(m) }"
+          @click="onCustomMenuClick(m)"
         >
           <el-icon><component :is="iconOf(m.icon)" /></el-icon>
           <span class="custom-nav-label">{{ m.name }}</span>
-          <el-icon class="custom-nav-del" @click.prevent.stop="onDeleteMenu(m)"><CircleClose /></el-icon>
-        </router-link>
+          <el-icon class="custom-nav-del" @click.stop="onDeleteMenu(m)"><CircleClose /></el-icon>
+        </div>
 
         <!-- 新增菜单按钮：与上面 nav-item 同宽同高，点击弹出对话框填名称+URL -->
         <button class="nav-item nav-add" @click="openAddDialog">
@@ -78,8 +79,88 @@
         </el-badge>
       </header>
 
+      <!-- 自定义菜单 Tab 栏：仅当有打开的 tab 时显示。
+           每个自定义菜单点击后开一个 tab，互不覆盖；点 tab 切换激活；点 x 关闭 -->
+      <div v-if="tabs.length > 0" class="menu-tab-bar">
+        <div class="menu-tabs">
+          <div
+            v-for="t in tabs"
+            :key="t.id"
+            class="menu-tab"
+            :class="{ active: t.id === activeTabId && tabMode }"
+            :title="t.name + ' · ' + t.url"
+            @click="activateTab(t.id)"
+          >
+            <el-icon class="tab-icon"><component :is="iconOf(t.icon)" /></el-icon>
+            <span class="tab-label">{{ t.name }}</span>
+            <el-icon class="tab-close" @click.stop="closeTab(t.id)"><Close /></el-icon>
+          </div>
+        </div>
+      </div>
+
       <main class="content">
-        <router-view />
+        <!-- Tab 视图：自定义菜单 iframe 多实例（每个 tab 独立 iframe，互不重载） -->
+        <div v-show="tabMode && tabs.length > 0" class="tab-view">
+          <!-- 当前激活 tab 的工具条 -->
+          <div class="tab-toolbar">
+            <div class="tab-toolbar-info">
+              <el-icon class="tbi-icon"><Link /></el-icon>
+              <span class="tbi-name">{{ activeTab?.name || "" }}</span>
+              <span class="tbi-url">{{ activeTab?.url || "" }}</span>
+            </div>
+            <div class="tab-toolbar-actions">
+              <button
+                class="ld-btn ld-btn-ghost"
+                :disabled="!activeTab"
+                @click="openTabExternal"
+              >
+                <el-icon><TopRight /></el-icon> 新窗口
+              </button>
+              <button
+                class="ld-btn ld-btn-ghost"
+                :disabled="!activeTab"
+                @click="onTabEdit"
+              >
+                <el-icon><Edit /></el-icon> 编辑
+              </button>
+              <button
+                class="ld-btn ld-btn-ghost danger"
+                :disabled="!activeTab"
+                @click="onTabDelete"
+              >
+                <el-icon><Delete /></el-icon> 删除
+              </button>
+            </div>
+          </div>
+          <!-- iframe 多实例：用 v-show 切换显隐，不销毁，保留登录态与滚动位置 -->
+          <div class="tab-frames">
+            <div
+              v-for="t in tabs"
+              :key="t.id"
+              class="tab-frame-item"
+              v-show="t.id === activeTabId"
+            >
+              <div v-if="!iframeLoaded[t.id]" class="iframe-loading">
+                <el-icon class="loading-icon" :size="28"><Loading /></el-icon>
+                <span>正在加载 {{ t.name }}…</span>
+                <span class="loading-hint">如长时间无响应，可点击「新窗口」打开</span>
+              </div>
+              <iframe
+                :src="t.url"
+                frameborder="0"
+                allow="fullscreen; clipboard-read; clipboard-write; encrypted-media; autoplay; picture-in-picture"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-presentation"
+                referrerpolicy="no-referrer"
+                @load="onIframeLoad(t.id)"
+              />
+            </div>
+          </div>
+        </div>
+        <!-- 普通 router-view：非 tab 模式或无 tab 时显示。
+             外包一层 wrapper 以便在 tab 视图模式下取消 padding（让 iframe 全屏铺满） -->
+        <div v-show="!tabMode || tabs.length === 0" class="router-view-wrap">
+          <router-view />
+        </div>
       </main>
     </div>
 
@@ -117,7 +198,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -134,16 +215,26 @@ import {
   Sunny,
   Plus,
   Link,
-  CircleClose
+  CircleClose,
+  Close,
+  Edit,
+  Delete,
+  TopRight,
+  Loading
 } from "@element-plus/icons-vue";
 import { useCustomMenus } from "@/composables/useCustomMenus";
+import { useMenuTabs } from "@/composables/useMenuTabs";
 import type { CustomMenu } from "@/api/customMenu";
 
 defineOptions({ name: "MainLayout" });
 
 const route = useRoute();
 const router = useRouter();
-const pageTitle = computed(() => (route.meta.title as string) || "LifeDesk");
+const pageTitle = computed(() => {
+  // tab 模式下优先显示当前 tab 名
+  if (tabMode.value && activeTab.value) return activeTab.value.name;
+  return (route.meta.title as string) || "LifeDesk";
+});
 
 const navItems = [
   { path: "/dashboard", label: "首页", icon: HomeFilled },
@@ -158,18 +249,56 @@ const navItems = [
 ];
 
 // ===== 自定义菜单 =====
-const { customMenus, loadCustomMenus, addCustomMenu, removeCustomMenu } = useCustomMenus();
+const { customMenus, loadCustomMenus, addCustomMenu, removeCustomMenu, editCustomMenu } =
+  useCustomMenus();
 
-// 判断某条自定义菜单是否是当前正在查看的（按 route.query.id 精确匹配，
-// 避免 router-link 的 active-class 在 /custom 路径下对所有菜单同时激活）
-function isCurrentMenu(m: CustomMenu): boolean {
-  return route.path === "/custom" && route.query.id === String(m.id);
+// ===== 自定义菜单 Tab 状态（模块级单例，跨组件共享） =====
+const {
+  tabs,
+  activeTabId,
+  activeTab,
+  tabMode,
+  openTab,
+  closeTab,
+  activateTab,
+  removeTab
+} = useMenuTabs();
+
+// 每个 iframe 是否加载完成（按 tab id 索引，加载完成后保留 true，切换 tab 不重置）
+const iframeLoaded = ref<Record<number, boolean>>({});
+
+function onIframeLoad(id: number) {
+  iframeLoaded.value[id] = true;
 }
+
+// 判断某条自定义菜单对应的 tab 是否处于激活状态（侧栏高亮用）
+function isTabActiveFor(m: CustomMenu): boolean {
+  return tabMode.value && activeTabId.value === m.id;
+}
+
+// 点击左侧自定义菜单：已打开 → 自动定位到该 tab；未打开 → 新增 tab 并定位
+function onCustomMenuClick(m: CustomMenu) {
+  openTab(m);
+  // 重置该 iframe 的 loading（若是首次打开则进入 loading 态；已加载完成的不变）
+  if (!(m.id! in iframeLoaded.value)) {
+    iframeLoaded.value[m.id!] = false;
+  }
+}
+
+// 点击普通导航项时，路由变化 → 自动退出 tab 视图，显示 router-view
+// （tab 不关闭，下次点自定义菜单或 tab 标签时可再切回）
+watch(
+  () => route.path,
+  (p) => {
+    if (p !== "/custom") {
+      tabMode.value = false;
+    }
+  }
+);
 
 // 图标映射：后端存的是字符串图标名，前端解析为组件
 function iconOf(icon?: string) {
   if (!icon) return Link;
-  // 简单映射，扩展时再补
   const map: Record<string, any> = { Link };
   return map[icon] || Link;
 }
@@ -204,13 +333,10 @@ async function onSubmitAdd() {
     await addCustomMenu({ name, url, sortNo: 0, icon: "Link" });
     ElMessage.success("已新增菜单");
     addDialogVisible.value = false;
-    // 新增后自动跳转到该菜单的嵌入页
+    // 新增后自动以 tab 方式打开该菜单
     const justAdded = customMenus.value.find((m) => m.name === name && m.url === url);
     if (justAdded && justAdded.id) {
-      router.push({
-        path: "/custom",
-        query: { id: String(justAdded.id), name: justAdded.name, url: justAdded.url }
-      });
+      onCustomMenuClick(justAdded);
     }
   } catch {
     /* 拦截器已提示 */
@@ -223,11 +349,60 @@ async function onDeleteMenu(m: CustomMenu) {
   try {
     await ElMessageBox.confirm(`确定删除菜单「${m.name}」？`, "提示", { type: "warning" });
     await removeCustomMenu(m.id!);
+    // 同步关闭对应的 tab
+    removeTab(m.id!);
     ElMessage.success("已删除");
-    // 如果当前正在看这条菜单的嵌入页，跳回首页
-    if (route.path === "/custom" && route.query.id === String(m.id)) {
-      router.replace("/dashboard");
-    }
+  } catch {
+    /* 取消或拦截器已提示 */
+  }
+}
+
+// ===== Tab 工具条操作 =====
+function openTabExternal() {
+  if (activeTab.value?.url) {
+    window.open(activeTab.value.url, "_blank", "noopener,noreferrer");
+  }
+}
+
+function onTabEdit() {
+  if (!activeTab.value) return;
+  const id = activeTab.value.id;
+  ElMessageBox.prompt("请输入菜单名称", "编辑菜单", {
+    inputValue: activeTab.value.name,
+    inputPattern: /.+/,
+    inputErrorMessage: "名称不能为空"
+  })
+    .then(async ({ value: name }) => {
+      ElMessageBox.prompt("请输入网站地址（URL）", "网站地址", {
+        inputValue: activeTab.value!.url,
+        inputPattern: /^https?:\/\/.+/,
+        inputErrorMessage: "请输入合法的 http(s) 地址"
+      })
+        .then(async ({ value: url }) => {
+          await editCustomMenu(id, { name, url });
+          // 同步 tab 信息（openTab 会把最新 name/url 写入已存在的 tab）
+          const updated = customMenus.value.find((m) => m.id === id);
+          if (updated) {
+            // url 变了 → 该 iframe 需要重新进入 loading 态
+            iframeLoaded.value[id] = false;
+            openTab(updated);
+          }
+          ElMessage.success("已保存");
+        })
+        .catch(() => {});
+    })
+    .catch(() => {});
+}
+
+async function onTabDelete() {
+  if (!activeTab.value) return;
+  const id = activeTab.value.id;
+  const name = activeTab.value.name;
+  try {
+    await ElMessageBox.confirm(`确定删除菜单「${name}」？`, "提示", { type: "warning" });
+    await removeCustomMenu(id);
+    removeTab(id);
+    ElMessage.success("已删除");
   } catch {
     /* 取消或拦截器已提示 */
   }
@@ -437,7 +612,183 @@ onMounted(() => {
 .content {
   flex: 1;
   overflow-y: auto;
+  padding: 0;             /* 取消外层 padding，由内部 .router-view-wrap / .tab-view 自管理 */
+  display: flex;
+  flex-direction: column;
+}
+
+/* 普通视图：保持原有 22px 内边距，让 dashboard 等页面布局不变 */
+.router-view-wrap {
+  flex: 1;
   padding: 22px;
+  overflow-y: auto;
+}
+
+/* ========== 自定义菜单 Tab 栏 ========== */
+.menu-tab-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  padding: 0 18px;
+  background: rgba(11, 8, 23, 0.55);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border-bottom: 1px solid $border-glass;
+  /* 兼容横向溢出：tab 多时可横向滚动 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  &::-webkit-scrollbar { height: 4px; }
+  &::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.3); border-radius: 2px; }
+}
+.menu-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px 0;
+}
+.menu-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 10px;
+  font-size: 13px;
+  color: $text-secondary;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid $border-glass;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  user-select: none;
+  &:hover {
+    background: rgba(167, 139, 250, 0.12);
+    color: $text-primary;
+    border-color: $border-accent;
+  }
+}
+.menu-tab.active {
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.32), rgba(196, 181, 253, 0.18));
+  color: $accent-light;
+  border-color: $border-accent;
+  box-shadow: 0 0 14px rgba(167, 139, 250, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.tab-icon {
+  font-size: 14px;
+  opacity: 0.85;
+}
+.tab-label {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-close {
+  margin-left: 4px;
+  font-size: 13px;
+  color: $text-tertiary;
+  border-radius: 4px;
+  padding: 1px;
+  transition: all 0.15s;
+  &:hover {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.15);
+  }
+}
+
+/* ========== Tab 视图：iframe 多实例 ========== */
+.tab-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* 让 iframe 嵌入区填满 content 高度 */
+  min-height: 0;
+}
+.tab-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px;
+  background: rgba(20, 14, 38, 0.5);
+  border-bottom: 1px solid $border-glass;
+}
+.tab-toolbar-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.tbi-icon {
+  color: $accent-light;
+  font-size: 15px;
+}
+.tbi-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: $text-primary;
+  white-space: nowrap;
+}
+.tbi-url {
+  font-size: 12px;
+  color: $text-tertiary;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.tab-frames {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  min-height: 0;
+}
+.tab-frame-item {
+  position: absolute;
+  inset: 0;
+  iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #fff;
+  }
+}
+.iframe-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: $text-tertiary;
+  font-size: 13px;
+  background: $bg-card;
+  z-index: 2;
+}
+.loading-icon {
+  color: $accent-light;
+  animation: tab-spin 1.1s linear infinite;
+}
+.loading-hint {
+  font-size: 11px;
+  color: $text-tertiary;
+  margin-top: 4px;
+}
+@keyframes tab-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Tab 工具条按钮复用 .ld-btn，额外加 .danger 修饰 */
+.tab-toolbar-actions .ld-btn.danger:hover {
+  color: #f87171;
 }
 
 /* 新增菜单弹窗 */
