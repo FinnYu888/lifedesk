@@ -74,6 +74,15 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
+        <!-- 主题切换：深紫玻璃(glass) ⇄ 科技HUD(tech)，选择持久化 localStorage -->
+        <button
+          class="theme-toggle"
+          :title="theme === 'tech' ? '切换到深紫玻璃风' : '切换到科技 HUD 风'"
+          @click="toggleTheme"
+        >
+          <el-icon :size="18"><component :is="theme === 'tech' ? Cpu : Sunny" /></el-icon>
+          <span>{{ theme === "tech" ? "科技 HUD" : "液态玻璃" }}</span>
+        </button>
         <el-badge :value="3" class="bell">
           <el-icon :size="20"><Bell /></el-icon>
         </el-badge>
@@ -220,16 +229,20 @@ import {
   Edit,
   Delete,
   TopRight,
-  Loading
+  Loading,
+  Cpu
 } from "@element-plus/icons-vue";
 import { useCustomMenus } from "@/composables/useCustomMenus";
 import { useMenuTabs } from "@/composables/useMenuTabs";
+import { useTheme } from "@/composables/useTheme";
 import type { CustomMenu } from "@/api/customMenu";
 
 defineOptions({ name: "MainLayout" });
 
 const route = useRoute();
 const router = useRouter();
+// ===== 主题切换 =====
+const { theme, toggleTheme } = useTheme();
 const pageTitle = computed(() => {
   // tab 模式下优先显示当前 tab 名
   if (tabMode.value && activeTab.value) return activeTab.value.name;
@@ -608,6 +621,45 @@ onMounted(() => {
   margin-left: auto;
   cursor: pointer;
   color: $text-secondary;
+}
+
+// 主题切换按钮：跟随主题变量自动换肤
+.theme-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  color: $text-secondary;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid $border-glass;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  &:hover {
+    color: $accent-light;
+    border-color: $border-accent;
+    background: rgba(167, 139, 250, 0.1);
+    box-shadow: 0 0 12px rgba(167, 139, 250, 0.25);
+  }
+}
+html[data-theme="tech"] .theme-toggle {
+  background: rgba(34, 211, 238, 0.08);
+  border-color: rgba(34, 211, 238, 0.35);
+  color: #8fb8dc;
+  &:hover {
+    color: #67e8f9;
+    border-color: rgba(34, 211, 238, 0.7);
+    background: rgba(34, 211, 238, 0.15);
+    box-shadow: 0 0 14px rgba(34, 211, 238, 0.4);
+  }
+}
+// bell 不再需要 margin-left:auto（theme-toggle 接管了推右）
+.bell {
+  margin-left: 0;
 }
 .content {
   flex: 1;
