@@ -25,25 +25,40 @@
 
     <!-- 双栏：左=收藏，右=笔记 -->
     <div class="dual-pane">
-      <!-- ========== 收藏：3D 立体环绕堆叠 ========== -->
+      <!-- ========== 收藏：3D 左右立体轮播（cover flow） ========== -->
       <div class="ld-card pane">
         <div class="pane-head">
           <div class="pane-head-left">
             <span class="pane-title">收藏</span>
             <span class="pane-count">{{ links.length }} 项</span>
           </div>
-          <div class="pane-tip">悬停弹出 · 拖拽顶部卡片抽出展开</div>
+          <div class="pane-tip">自动轮播 · 悬停弹起停止 · 点箭头切换</div>
         </div>
         <div class="pane-body">
           <div v-if="links.length === 0" class="empty">暂无收藏，点击右上「新建收藏」</div>
-          <div v-else class="card-stack" @mouseleave="hoverIdx = -1">
-            <!-- 堆叠卡片层（按 index 由远到近渲染，近的覆盖远的） -->
+          <div
+            v-else
+            class="card-stack"
+            @mouseenter="onLinkStackEnter"
+            @mouseleave="onLinkStackLeave"
+          >
+            <!-- 左箭头 -->
+            <button
+              v-if="links.length > 1"
+              class="arrow-btn arrow-left"
+              @click="linkPrev"
+              aria-label="上一张"
+            >
+              <el-icon><ArrowLeft /></el-icon>
+            </button>
+
+            <!-- cover flow 卡片层 -->
             <div
               v-for="(item, i) in links"
               :key="item.id"
               class="stack-card link-card"
               :class="{
-                top: i === 0,
+                center: i === currentLinkIdx,
                 hovered: hoverIdx === i,
                 dragging: dragIdx === i,
                 dim: hoverIdx >= 0 && hoverIdx !== i
@@ -93,6 +108,16 @@
               </div>
             </div>
 
+            <!-- 右箭头 -->
+            <button
+              v-if="links.length > 1"
+              class="arrow-btn arrow-right"
+              @click="linkNext"
+              aria-label="下一张"
+            >
+              <el-icon><ArrowRight /></el-icon>
+            </button>
+
             <!-- 详情展开覆盖层（拖拽抽出 ≥ 阈值时触发） -->
             <transition name="detail">
               <div
@@ -134,24 +159,39 @@
         </div>
       </div>
 
-      <!-- ========== 笔记：3D 立体堆叠（简单标题卡） ========== -->
+      <!-- ========== 笔记：3D 左右立体轮播（简单标题卡） ========== -->
       <div class="ld-card pane">
         <div class="pane-head">
           <div class="pane-head-left">
             <span class="pane-title">笔记</span>
             <span class="pane-count">{{ notes.length }} 项</span>
           </div>
-          <div class="pane-tip">拖拽顶部卡片抽出展开详情</div>
+          <div class="pane-tip">自动轮播 · 悬停弹起停止 · 点箭头切换</div>
         </div>
         <div class="pane-body">
           <div v-if="notes.length === 0" class="empty">暂无笔记</div>
-          <div v-else class="card-stack note-stack" @mouseleave="hoverNoteIdx = -1">
+          <div
+            v-else
+            class="card-stack note-stack"
+            @mouseenter="onNoteStackEnter"
+            @mouseleave="onNoteStackLeave"
+          >
+            <!-- 左箭头 -->
+            <button
+              v-if="notes.length > 1"
+              class="arrow-btn arrow-left"
+              @click="notePrev"
+              aria-label="上一篇"
+            >
+              <el-icon><ArrowLeft /></el-icon>
+            </button>
+
             <div
               v-for="(item, i) in notes"
               :key="item.id"
               class="stack-card note-card"
               :class="{
-                top: i === 0,
+                center: i === currentNoteIdx,
                 hovered: hoverNoteIdx === i,
                 dragging: dragNoteIdx === i,
                 dim: hoverNoteIdx >= 0 && hoverNoteIdx !== i
@@ -174,6 +214,16 @@
                 <el-icon class="op danger" @click="onDelete(item)"><Delete /></el-icon>
               </div>
             </div>
+
+            <!-- 右箭头 -->
+            <button
+              v-if="notes.length > 1"
+              class="arrow-btn arrow-right"
+              @click="noteNext"
+              aria-label="下一篇"
+            >
+              <el-icon><ArrowRight /></el-icon>
+            </button>
 
             <transition name="detail">
               <div
@@ -271,7 +321,7 @@ import { ref, onMounted, onBeforeUnmount } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   Search, Plus, Link, Document, Edit, Delete,
-  ArrowUp, ArrowDown, Close, Picture
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Close, Picture
 } from "@element-plus/icons-vue";
 import {
   fetchFavorites,
@@ -288,7 +338,7 @@ const keyword = ref("");
 const links = ref<Favorite[]>([]);
 const notes = ref<Favorite[]>([]);
 
-// ===== 收藏：3D 堆叠交互状态 =====
+// ===== 收藏：3D 轮播交互状态 =====
 const hoverIdx = ref(-1);
 const dragIdx = ref(-1);
 const dragStartX = ref(0);
@@ -296,14 +346,20 @@ const dragDeltaX = ref(0);
 const dragging = ref(false);
 const detailIdx = ref(-1);
 const imgLoaded = ref<Record<number, boolean>>({});
+// cover flow 中心卡索引
+const currentLinkIdx = ref(0);
+let autoLinkTimer: any = null;
+const AUTO_INTERVAL = 3500;
 
-// ===== 笔记：3D 堆叠交互状态 =====
+// ===== 笔记：3D 轮播交互状态 =====
 const hoverNoteIdx = ref(-1);
 const dragNoteIdx = ref(-1);
 const dragNoteStartX = ref(0);
 const dragNoteDeltaX = ref(0);
 const draggingNote = ref(false);
 const detailNoteIdx = ref(-1);
+const currentNoteIdx = ref(0);
+let autoNoteTimer: any = null;
 
 // ===== 编辑弹窗 =====
 const dialogVisible = ref(false);
@@ -332,6 +388,8 @@ async function load() {
     dragNoteIdx.value = -1;
     detailNoteIdx.value = -1;
     imgLoaded.value = {};
+    currentLinkIdx.value = 0;
+    currentNoteIdx.value = 0;
   } catch {
     /* 拦截器已提示 */
   }
@@ -382,112 +440,168 @@ function envLabel(env: string): string {
   return map[env] || env;
 }
 
-// ===== 立体堆叠 transform 计算 =====
+// ===== 立体轮播（cover flow）transform 计算 =====
+// offset = i - currentIdx（相对中心的偏移，左侧为负、右侧为正）
+// 卡片按 offset 做 translateX + rotateY + translateZ + scale，形成左右立体轮播
 function linkStyle(i: number) {
   const n = links.value.length;
-  // 基础：index 越大（越靠后）越下沉 + 缩小 + 旋转
-  const baseY = i * 22;
-  const baseZ = -i * 16;
-  const baseScale = Math.max(0.78, 1 - i * 0.04);
-  const baseRot = (i % 2 === 0 ? 1 : -1) * (1 + i * 0.7);
+  const offset = i - currentLinkIdx.value;
+  const abs = Math.abs(offset);
+  // cover flow 排布：左右展开 + 侧面旋转 + 远处下沉
+  let x = offset * 220;
+  let y = 0;
+  let z = -abs * 110;
+  let scale = Math.max(0.62, 1 - abs * 0.13);
+  let rot = offset * -38;  // 左侧卡 rotateY 正（向右转）、右侧卡负
+  let zIdx = 100 - abs;
+  let opacity = Math.max(0.35, 1 - abs * 0.18);
 
-  let y = baseY, z = baseZ, scale = baseScale, rot = baseRot, x = 0;
-  let zIdx = n - i; // 默认按 index 反序，前面的覆盖后面的
-
-  // hover 弹出
+  // 鼠标 hover 弹起：该卡大幅前移 + 放大；其他卡维持
   if (hoverIdx.value === i) {
-    y = baseY - 8;
-    z = 80 - i * 6;
-    scale = 1.1;
-    rot = 0;
+    z = z + 90;
+    scale = Math.max(scale, 1.12);
+    y = -10;
+    rot = rot * 0.25;  // hover 时旋转减弱（更正面展示）
     zIdx = 1000;
-  } else if (hoverIdx.value >= 0) {
-    // 其他卡：下沉 + 旋转加剧（旋钮转动下沉）
-    const dist = Math.abs(hoverIdx.value - i);
-    y = baseY + dist * 14 + 6;
-    z = baseZ - dist * 10;
-    scale = Math.max(0.7, baseScale - dist * 0.03);
-    rot = baseRot + (i < hoverIdx.value ? -1 : 1) * dist * 3;
   }
 
-  // 拖拽中
+  // 拖拽中心卡抽出
   if (dragging.value && dragIdx.value === i) {
-    x = dragDeltaX.value;
-    z = 120;
-    scale = 1.12;
-    y = baseY - 12;
+    x = offset * 220 + dragDeltaX.value;
+    z = 140;
+    scale = 1.15;
+    y = -16;
     rot = dragDeltaX.value * 0.18;
     zIdx = 2000;
-  } else if (dragging.value && dragIdx.value >= 0) {
-    // 后方卡按重量（i+1）依次下沉
-    const weight = (i + 1) * 0.35;
+  } else if (dragging.value && dragIdx.value === currentLinkIdx.value) {
+    // 后方卡（非中心）按重量 abs 下沉
+    const weight = abs * 0.45 + 0.2;
     const dragAbs = Math.abs(dragDeltaX.value);
-    y = baseY + dragAbs * weight * 0.35;
-    z = baseZ - dragAbs * weight * 0.12;
-    scale = Math.max(0.7, baseScale - dragAbs * weight * 0.0006);
+    y = dragAbs * weight * 0.35;
+    z = -abs * 110 - dragAbs * weight * 0.12;
+    scale = Math.max(0.5, scale - dragAbs * weight * 0.0006);
   }
 
   const transitionMode =
     (dragging.value && dragIdx.value === i)
-      ? "none" // 拖拽中不使用 transition，避免跟不上指针
-      : "transform 0.55s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s";
+      ? "none"
+      : "transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s, opacity 0.4s";
 
   return {
     transform: `translate3d(${x}px, ${y}px, ${z}px) scale(${scale}) rotateY(${rot}deg)`,
     zIndex: zIdx,
+    opacity: opacity,
     transition: transitionMode
   };
 }
 
 function noteStyle(i: number) {
   const n = notes.value.length;
-  const baseY = i * 18;
-  const baseZ = -i * 14;
-  const baseScale = Math.max(0.82, 1 - i * 0.035);
-  const baseRot = (i % 2 === 0 ? 1 : -1) * (0.8 + i * 0.6);
-
-  let y = baseY, z = baseZ, scale = baseScale, rot = baseRot, x = 0;
-  let zIdx = n - i;
+  const offset = i - currentNoteIdx.value;
+  const abs = Math.abs(offset);
+  let x = offset * 200;
+  let y = 0;
+  let z = -abs * 100;
+  let scale = Math.max(0.66, 1 - abs * 0.12);
+  let rot = offset * -36;
+  let zIdx = 100 - abs;
+  let opacity = Math.max(0.4, 1 - abs * 0.16);
 
   if (hoverNoteIdx.value === i) {
-    y = baseY - 6;
-    z = 80 - i * 6;
-    scale = 1.08;
-    rot = 0;
+    z = z + 80;
+    scale = Math.max(scale, 1.1);
+    y = -8;
+    rot = rot * 0.25;
     zIdx = 1000;
-  } else if (hoverNoteIdx.value >= 0) {
-    const dist = Math.abs(hoverNoteIdx.value - i);
-    y = baseY + dist * 12 + 4;
-    z = baseZ - dist * 8;
-    scale = Math.max(0.72, baseScale - dist * 0.025);
-    rot = baseRot + (i < hoverNoteIdx.value ? -1 : 1) * dist * 2.5;
   }
 
   if (draggingNote.value && dragNoteIdx.value === i) {
-    x = dragNoteDeltaX.value;
-    z = 120;
-    scale = 1.1;
-    y = baseY - 10;
+    x = offset * 200 + dragNoteDeltaX.value;
+    z = 140;
+    scale = 1.12;
+    y = -14;
     rot = dragNoteDeltaX.value * 0.18;
     zIdx = 2000;
-  } else if (draggingNote.value && dragNoteIdx.value >= 0) {
-    const weight = (i + 1) * 0.35;
+  } else if (draggingNote.value && dragNoteIdx.value === currentNoteIdx.value) {
+    const weight = abs * 0.45 + 0.2;
     const dragAbs = Math.abs(dragNoteDeltaX.value);
-    y = baseY + dragAbs * weight * 0.35;
-    z = baseZ - dragAbs * weight * 0.12;
-    scale = Math.max(0.72, baseScale - dragAbs * weight * 0.0006);
+    y = dragAbs * weight * 0.35;
+    z = -abs * 100 - dragAbs * weight * 0.12;
+    scale = Math.max(0.55, scale - dragAbs * weight * 0.0006);
   }
 
   const transitionMode =
     (draggingNote.value && dragNoteIdx.value === i)
       ? "none"
-      : "transform 0.55s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s";
+      : "transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s, opacity 0.4s";
 
   return {
     transform: `translate3d(${x}px, ${y}px, ${z}px) scale(${scale}) rotateY(${rot}deg)`,
     zIndex: zIdx,
+    opacity: opacity,
     transition: transitionMode
   };
+}
+
+// ===== 自动轮播 + 鼠标进出容器 =====
+function startLinkAuto() {
+  stopLinkAuto();
+  if (links.value.length < 2) return;
+  autoLinkTimer = setInterval(() => {
+    if (dragging.value || detailIdx.value >= 0) return;
+    currentLinkIdx.value = (currentLinkIdx.value + 1) % links.value.length;
+  }, AUTO_INTERVAL);
+}
+function stopLinkAuto() {
+  if (autoLinkTimer) {
+    clearInterval(autoLinkTimer);
+    autoLinkTimer = null;
+  }
+}
+function linkPrev() {
+  if (links.value.length < 2) return;
+  currentLinkIdx.value = (currentLinkIdx.value - 1 + links.value.length) % links.value.length;
+}
+function linkNext() {
+  if (links.value.length < 2) return;
+  currentLinkIdx.value = (currentLinkIdx.value + 1) % links.value.length;
+}
+function onLinkStackEnter() {
+  stopLinkAuto();
+}
+function onLinkStackLeave() {
+  hoverIdx.value = -1;
+  startLinkAuto();
+}
+
+function startNoteAuto() {
+  stopNoteAuto();
+  if (notes.value.length < 2) return;
+  autoNoteTimer = setInterval(() => {
+    if (draggingNote.value || detailNoteIdx.value >= 0) return;
+    currentNoteIdx.value = (currentNoteIdx.value + 1) % notes.value.length;
+  }, AUTO_INTERVAL);
+}
+function stopNoteAuto() {
+  if (autoNoteTimer) {
+    clearInterval(autoNoteTimer);
+    autoNoteTimer = null;
+  }
+}
+function notePrev() {
+  if (notes.value.length < 2) return;
+  currentNoteIdx.value = (currentNoteIdx.value - 1 + notes.value.length) % notes.value.length;
+}
+function noteNext() {
+  if (notes.value.length < 2) return;
+  currentNoteIdx.value = (currentNoteIdx.value + 1) % notes.value.length;
+}
+function onNoteStackEnter() {
+  stopNoteAuto();
+}
+function onNoteStackLeave() {
+  hoverNoteIdx.value = -1;
+  startNoteAuto();
 }
 
 // ===== 收藏：点击 & 拖拽处理 =====
@@ -496,15 +610,18 @@ function onLinkClick(e: MouseEvent, item: Favorite, i: number) {
   if (dragging.value || Math.abs(dragDeltaX.value) > 5) return;
   // 详情展开时点击不触发访问
   if (detailIdx.value >= 0) return;
-  // 只有顶部卡（i=0）或 hover 中的卡点击直接访问
-  if (hoverIdx.value === i || i === 0) {
-    openLink(item);
+  // 非中心卡点击 → 切换为中心
+  if (i !== currentLinkIdx.value) {
+    currentLinkIdx.value = i;
+    return;
   }
+  // 中心卡点击 → 访问链接
+  openLink(item);
 }
 
 function onLinkPointerDown(e: PointerEvent, i: number) {
-  // 只有顶部卡可拖拽抽出
-  if (i !== 0) return;
+  // 仅中心卡可拖拽抽出
+  if (i !== currentLinkIdx.value) return;
   if (detailIdx.value >= 0) return;
   dragIdx.value = i;
   dragStartX.value = e.clientX;
@@ -555,14 +672,17 @@ function closeDetail() {
 function onNoteClick(e: MouseEvent, item: Favorite, i: number) {
   if (draggingNote.value || Math.abs(dragNoteDeltaX.value) > 5) return;
   if (detailNoteIdx.value >= 0) return;
-  if (hoverNoteIdx.value === i || i === 0) {
-    // 笔记点击顶部卡也展开详情
-    detailNoteIdx.value = i;
+  // 非中心卡点击 → 切换为中心
+  if (i !== currentNoteIdx.value) {
+    currentNoteIdx.value = i;
+    return;
   }
+  // 中心卡点击 → 展开详情
+  detailNoteIdx.value = i;
 }
 
 function onNotePointerDown(e: PointerEvent, i: number) {
-  if (i !== 0) return;
+  if (i !== currentNoteIdx.value) return;
   if (detailNoteIdx.value >= 0) return;
   dragNoteIdx.value = i;
   dragNoteStartX.value = e.clientX;
@@ -655,14 +775,20 @@ function formatTime(t?: string) {
   return (t as string).replace("T", " ").substring(5, 16);
 }
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  startLinkAuto();
+  startNoteAuto();
+});
 
-// 组件卸载前清理全局监听
+// 组件卸载前清理全局监听与定时器
 onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onLinkPointerMove);
   window.removeEventListener("pointerup", onLinkPointerUp);
   window.removeEventListener("pointermove", onNotePointerMove);
   window.removeEventListener("pointerup", onNotePointerUp);
+  stopLinkAuto();
+  stopNoteAuto();
 });
 </script>
 
@@ -757,7 +883,7 @@ onBeforeUnmount(() => {
   height: 320px;
 }
 
-/* ========== 堆叠卡片（共享样式） ========== */
+/* ========== 轮播卡片（共享样式） ========== */
 .stack-card {
   position: absolute;
   top: 0;
@@ -768,12 +894,21 @@ onBeforeUnmount(() => {
   backface-visibility: hidden;
   cursor: pointer;
   user-select: none;
+  transform-origin: center center;
   /* 玻璃风：半透明 + 内高光 */
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
   border: 1px solid $border-glass;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   overflow: hidden;
-  will-change: transform;
+  will-change: transform, opacity;
+}
+/* 中心卡：边框高亮 + 阴影更亮，强调"当前展示" */
+.stack-card.center {
+  border-color: $border-accent;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5),
+              0 0 0 1px rgba(196, 181, 253, 0.25),
+              0 0 28px rgba(167, 139, 250, 0.25),
+              inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 .stack-card.dim {
   filter: brightness(0.55) saturate(0.7);
@@ -886,6 +1021,43 @@ onBeforeUnmount(() => {
   background: rgba(167, 139, 250, 0.12);
   color: $text-secondary;
   border: 1px solid rgba(167, 139, 250, 0.18);
+}
+
+/* ========== 左右轮播箭头按钮 ========== */
+.arrow-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(20, 14, 38, 0.7);
+  border: 1px solid $border-glass;
+  color: $text-secondary;
+  font-size: 18px;
+  cursor: pointer;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  transition: all 0.18s;
+  &:hover {
+    color: $text-primary;
+    border-color: $border-accent;
+    background: rgba(167, 139, 250, 0.18);
+    box-shadow: 0 0 16px rgba(167, 139, 250, 0.35);
+    transform: translateY(-50%) scale(1.08);
+  }
+  &:active {
+    transform: translateY(-50%) scale(0.95);
+  }
+}
+.arrow-left {
+  left: 8px;
+}
+.arrow-right {
+  right: 8px;
 }
 
 .card-actions {
