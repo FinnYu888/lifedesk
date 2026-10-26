@@ -243,7 +243,24 @@
                       <span v-if="notes[detailNoteIdx].description" class="note-tag">{{ notes[detailNoteIdx].description }}</span>
                       <span class="note-time">{{ formatTime(notes[detailNoteIdx].updateTime || notes[detailNoteIdx].createTime) }}</span>
                     </div>
-                    <pre class="note-content">{{ notes[detailNoteIdx].value }}</pre>
+                    <!-- 每行后带复制按钮，点击复制该行文本 -->
+                    <div class="note-content">
+                      <div
+                        v-for="(line, li) in activeNoteLines"
+                        :key="li"
+                        class="note-line"
+                      >
+                        <span class="line-text">{{ line }}</span>
+                        <button
+                          class="line-copy"
+                          title="复制该行"
+                          @click="copyNoteLine(line)"
+                        >
+                          <el-icon><CopyDocument /></el-icon>
+                        </button>
+                      </div>
+                      <div v-if="!activeNoteLines.length" class="note-line empty-line">（笔记内容为空）</div>
+                    </div>
                     <div class="detail-actions">
                       <button class="ld-btn ld-btn-ghost" @click="openEdit(notes[detailNoteIdx])">
                         <el-icon><Edit /></el-icon> 编辑
@@ -302,7 +319,7 @@
             <label>截图 URL（留空自动从公开截图服务生成）</label>
             <el-input
               v-model="form.screenshot"
-              placeholder="如 https://...png，留空自动用 mShots 服务"
+              placeholder="图片 URL / 本地路径（如 D:\pics\login.png），留空自动截图"
               clearable
             />
           </div>
@@ -319,11 +336,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   Search, Plus, Link, Document, Edit, Delete,
-  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Close, Picture
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Close, Picture, CopyDocument
 } from "@element-plus/icons-vue";
 import {
   fetchFavorites,
@@ -365,6 +382,35 @@ const dragNoteStartX = ref(0);
 const dragNoteDeltaX = ref(0);
 const draggingNote = ref(false);
 const detailNoteIdx = ref(-1);
+// 笔记详情：按行拆分（供每行复制按钮使用）
+const activeNoteLines = computed<string[]>(() => {
+  const note = detailNoteIdx.value >= 0 ? notes.value[detailNoteIdx.value] : null;
+  if (!note?.value) return [];
+  return note.value.split("\n");
+});
+
+// 复制笔记某一行文本
+async function copyNoteLine(line: string) {
+  try {
+    await navigator.clipboard.writeText(line);
+    ElMessage.success("已复制该行");
+  } catch {
+    // 剪贴板 API 不可用时的兜底（非 https/无权限）
+    const ta = document.createElement("textarea");
+    ta.value = line;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      ElMessage.success("已复制该行");
+    } catch {
+      ElMessage.error("复制失败，请手动复制");
+    }
+    document.body.removeChild(ta);
+  }
+}
 const currentNoteIdx = ref(0);
 let autoNoteTimer: any = null;
 const inertiaNoteRunning = ref(false);
@@ -411,14 +457,31 @@ function onSearch() {
 }
 
 // ===== 截图 URL 兜底：用户没填时用 mShots 公开截图服务 =====
+// 支持三类来源：
+//   1. http(s):// 或 data: 开头 → 直接使用
+//   2. 本地图片绝对路径（C:\... / C:/... / file:///... / /home/...）→ 走后端代理
+//      /local-file?path=xxx（浏览器禁止 http 页面加载 file:// 图片，须由后端读流返回）
+//   3. 未填 → mShots 公开截图服务
+function isLocalImagePath(s: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(s)        // Windows 盘符 C:\ 或 C:/
+    || s.startsWith("file://")             // file:/// 协议
+    || (s.startsWith("/") && !s.startsWith("//"));  // Unix 绝对路径（排除 //host 协议相对）
+}
+
 function screenshotOf(item: Favorite): string {
-  if (item.screenshot) return item.screenshot;
+  const s = (item.screenshot || "").trim();
+  if (s) {
+    if (isLocalImagePath(s)) {
+      return `/api/local-file?path=${encodeURIComponent(s)}`;
+    }
+    return s;
+  }
   if (!item.value) return "";
   return `https://s.wordpress.com/mshots/v1/${encodeURIComponent(item.value)}?w=480&h=320`;
 }
 
 function onImgError(e: Event, item: Favorite) {
-  // 加载失败 → 用 favicon 兜底
+  // 加载失败 → 用 favicon 兜底（本地路径填错时也会走到这里）
   const img = e.target as HTMLImageElement;
   if (!item.value) return;
   try {
@@ -1410,18 +1473,66 @@ onBeforeUnmount(() => {
 }
 .note-content {
   margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
   color: $text-secondary;
   line-height: 1.7;
   background: rgba(0, 0, 0, 0.25);
-  padding: 14px 16px;
+  padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid $border-subtle;
   max-height: 60vh;
   overflow: auto;
+}
+/* 每行：文本 + hover 显示的复制按钮 */
+.note-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  transition: background 0.15s;
+  &:hover {
+    background: rgba(167, 139, 250, 0.1);
+  }
+}
+.line-text {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.line-copy {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: $text-tertiary;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+  .note-line:hover & {
+    opacity: 1;
+  }
+  &:hover {
+    color: $accent-light;
+    background: rgba(167, 139, 250, 0.18);
+    box-shadow: 0 0 8px rgba(167, 139, 250, 0.3);
+  }
+  &:active {
+    transform: scale(0.9);
+  }
+}
+.empty-line {
+  color: $text-tertiary;
+  justify-content: center;
+  padding: 10px 0;
 }
 
 /* ========== 详情展开过渡 ========== */
