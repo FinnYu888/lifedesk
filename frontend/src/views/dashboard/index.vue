@@ -108,17 +108,22 @@
           <VChart :option="commitChartOption" autoresize style="height: 160px" />
         </div>
 
-        <!-- 5. 最近提交活动 -->
+        <!-- 5. 测试用例·通过率（双租户汇总） -->
         <div class="ld-card">
-          <div class="hc-title">最近提交活动</div>
-          <div v-if="!projCommits.length" class="empty-mini text-tertiary">暂无提交记录</div>
-          <div
-            v-for="c in projCommits.slice(0, 5)"
-            :key="c.id"
-            class="commit-row"
-          >
-            <span class="commit-msg">{{ c.message }}</span>
-            <span class="commit-meta text-tertiary">{{ c.repo }} · {{ c.author }}</span>
+          <div class="hc-title">测试用例·通过率</div>
+          <div v-if="!rptStats.length" class="empty-mini text-tertiary">加载中...</div>
+          <div v-for="t in rptStats" :key="t.tenantId" class="rpt-sum">
+            <div class="rpt-sum-head">
+              <span class="rpt-sum-name">{{ (t.tenantName || `租户${t.tenantId}`).replace(/堆场$/, "") }}</span>
+              <span class="rpt-sum-rate" :class="rptSumRateCls(t)">{{ rptSumRate(t) }}%</span>
+            </div>
+            <div class="rpt-sum-track">
+              <div class="rpt-sum-fill" :style="{ width: Math.max(0, Math.min(100, rptSumRate(t))) + '%' }" />
+            </div>
+            <div class="rpt-sum-stat">
+              用例 {{ rptSumTotal(t) }} · 通过 {{ rptSumPassed(t) }} · 失败
+              <b :class="{ 'text-danger': rptSumFailed(t) > 0 }">{{ rptSumFailed(t) }}</b>
+            </div>
           </div>
         </div>
 
@@ -231,6 +236,7 @@ import StatusBadge from "@/components/StatusBadge.vue";
 import { fetchGreeting, fetchModuleStat } from "@/api/dashboard";
 import { recordHealth } from "@/api/health";
 import { fetchProjectStat, fetchProjectActive, fetchProjectCommits } from "@/api/project";
+import { fetchRptPassRate, type RptTenantPassRate } from "@/api/rptStats";
 import {
   fetchRequirements,
   fetchRequirementMilestones,
@@ -252,6 +258,8 @@ const projActive = ref<any[]>([]);
 const projCommits = ref<any[]>([]);
 const milestones = ref<RequirementMilestone[]>([]);
 const requirements = ref<Requirement[]>([]);
+// 测试用例·通过率（双租户汇总）
+const rptStats = ref<RptTenantPassRate[]>([]);
 
 const dateStr =
   new Date().toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }).replace("/", "月") + "日";
@@ -315,13 +323,50 @@ function milestoneColor(progress: number): string {
   return "#f87171";
 }
 
-/** 本周提交活跃度趋势（基于 commits 数据模拟 7 天分布） */
+// ===== 测试用例·通过率（双租户汇总） =====
+/** 单租户用例总数 */
+function rptSumTotal(t: RptTenantPassRate): number {
+  return (t.modules || []).reduce((s, m) => s + (m.totalCount || 0), 0);
+}
+/** 单租户通过数 */
+function rptSumPassed(t: RptTenantPassRate): number {
+  return (t.modules || []).reduce((s, m) => s + (m.passedCount || 0), 0);
+}
+/** 单租户失败数 */
+function rptSumFailed(t: RptTenantPassRate): number {
+  return (t.modules || []).reduce((s, m) => s + (m.failedCount || 0), 0);
+}
+/** 单租户整体通过率（百分比，2 位小数） */
+function rptSumRate(t: RptTenantPassRate): number {
+  const total = rptSumTotal(t);
+  if (!total) return 0;
+  return +((rptSumPassed(t) / total) * 100).toFixed(2);
+}
+/** 通过率分级配色（≥90 绿、≥70 黄、否则红） */
+function rptSumRateCls(t: RptTenantPassRate): string {
+  const r = rptSumRate(t);
+  if (r >= 90) return "text-positive";
+  if (r >= 70) return "text-warning";
+  return "text-danger";
+}
+/** 加载双租户用例通过率（独立加载，避免 RPT 慢拖累首页主数据） */
+async function loadRptStats() {
+  try {
+    const res = await fetchRptPassRate();
+    rptStats.value = res.data || [];
+  } catch {
+    /* 拦截器已提示 */
+  }
+}
+
+/** 本周提交活跃度趋势：每天柱子用不同颜色（周一~周日 7 色循环） */
 const commitChartOption = computed(() => {
   const total = projStat.value?.week_commits ?? 0;
   // 把本周提交数按 7 天模拟分布（实际后端未提供按天数据，这里做示意性展示）
   const base = Math.max(1, Math.floor(total / 5));
   const data = [base, base + 2, base + 1, base + 3, base, base + 2, Math.max(1, total - base * 5 - 8)];
   const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const palette = ["#a78bfa", "#818cf8", "#60a5fa", "#34d399", "#fbbf24", "#fb923c", "#f87171"];
   return {
     tooltip: { trigger: "axis" },
     grid: { left: 30, right: 12, top: 10, bottom: 22 },
@@ -340,7 +385,7 @@ const commitChartOption = computed(() => {
         type: "bar",
         barWidth: "45%",
         itemStyle: {
-          color: "#a78bfa",
+          color: (params: any) => palette[params.dataIndex % palette.length],
           borderRadius: [4, 4, 0, 0]
         }
       }
@@ -413,7 +458,10 @@ const weightChartOption = computed(() => ({
   ]
 }));
 
-onMounted(loadAll);
+onMounted(() => {
+  loadAll();
+  loadRptStats();
+});
 </script>
 
 <style scoped lang="scss">
@@ -557,6 +605,52 @@ onMounted(loadAll);
 }
 .commit-meta {
   font-size: 11px;
+}
+
+/* ===== 测试用例·通过率（双租户汇总） ===== */
+.rpt-sum {
+  margin-bottom: 12px;
+  &:last-of-type {
+    margin-bottom: 0;
+  }
+}
+.rpt-sum-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.rpt-sum-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: $text-primary;
+}
+.rpt-sum-rate {
+  font-size: 16px;
+  font-weight: 700;
+}
+.rpt-sum-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(52, 211, 153, 0.15);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.rpt-sum-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #34d399;
+  transition: width 0.4s ease;
+}
+.rpt-sum-stat {
+  font-size: 12px;
+  color: $text-tertiary;
+  b {
+    color: $text-primary;
+    &.text-danger {
+      color: $color-danger;
+    }
+  }
 }
 /* 统计概览 */
 .stat-overview {
