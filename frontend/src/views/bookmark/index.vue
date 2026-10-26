@@ -1,6 +1,6 @@
 <template>
   <div class="bookmark-page">
-    <!-- 顶部搜索 + 操作 -->
+    <!-- 顶部搜索（新建按钮已挪到各自区域 pane-head） -->
     <div class="ld-card top-bar">
       <el-input
         v-model="keyword"
@@ -13,14 +13,6 @@
           <el-icon><Search /></el-icon>
         </template>
       </el-input>
-      <div class="top-actions">
-        <button class="ld-btn ld-btn-ghost" @click="openCreate('link')">
-          <el-icon><Plus /></el-icon> 新建收藏
-        </button>
-        <button class="ld-btn ld-btn-ghost" @click="openCreate('note')">
-          <el-icon><Plus /></el-icon> 新建笔记
-        </button>
-      </div>
     </div>
 
     <!-- 双栏：左=收藏，右=笔记 -->
@@ -32,7 +24,12 @@
             <span class="pane-title">收藏</span>
             <span class="pane-count">{{ links.length }} 项</span>
           </div>
-          <div class="pane-tip">自动轮播 · 悬停弹起停止 · 点箭头切换</div>
+          <div class="pane-head-right">
+            <span class="pane-tip">悬停弹起 · 点箭头切换</span>
+            <button class="ld-btn ld-btn-ghost pane-create" @click="openCreate('link')">
+              <el-icon><Plus /></el-icon> 新建收藏
+            </button>
+          </div>
         </div>
         <div class="pane-body">
           <div v-if="links.length === 0" class="empty">暂无收藏，点击右上「新建收藏」</div>
@@ -42,15 +39,15 @@
             @mouseenter="onLinkStackEnter"
             @mouseleave="onLinkStackLeave"
           >
-            <!-- 左箭头 -->
-            <button
+            <!-- 左箭头：.arrow-zone 父容器做热区（80x80），::after 画中心 44x44 圆形视觉，z-index 9999 远高于卡片，杜绝连续点击穿透 -->
+            <div
               v-if="links.length > 1"
-              class="arrow-btn arrow-left"
+              class="arrow-zone arrow-zone-left"
               @click="linkPrev"
               aria-label="上一张"
             >
               <el-icon><ArrowLeft /></el-icon>
-            </button>
+            </div>
 
             <!-- cover flow 卡片层 -->
             <div
@@ -80,7 +77,7 @@
                   <el-icon><Picture /></el-icon>
                 </div>
               </div>
-              <!-- 信息区 -->
+              <!-- 信息区：填充背景色让文字更突出 -->
               <div class="info">
                 <div class="name">{{ item.name }}</div>
                 <div class="url">{{ item.value }}</div>
@@ -109,14 +106,14 @@
             </div>
 
             <!-- 右箭头 -->
-            <button
+            <div
               v-if="links.length > 1"
-              class="arrow-btn arrow-right"
+              class="arrow-zone arrow-zone-right"
               @click="linkNext"
               aria-label="下一张"
             >
               <el-icon><ArrowRight /></el-icon>
-            </button>
+            </div>
 
             <!-- 详情展开覆盖层（拖拽抽出 ≥ 阈值时触发） -->
             <transition name="detail">
@@ -166,10 +163,15 @@
             <span class="pane-title">笔记</span>
             <span class="pane-count">{{ notes.length }} 项</span>
           </div>
-          <div class="pane-tip">自动轮播 · 悬停弹起停止 · 点箭头切换</div>
+          <div class="pane-head-right">
+            <span class="pane-tip">悬停弹起 · 点箭头切换</span>
+            <button class="ld-btn ld-btn-ghost pane-create" @click="openCreate('note')">
+              <el-icon><Plus /></el-icon> 新建笔记
+            </button>
+          </div>
         </div>
         <div class="pane-body">
-          <div v-if="notes.length === 0" class="empty">暂无笔记</div>
+          <div v-if="notes.length === 0" class="empty">暂无笔记，点击右上「新建笔记」</div>
           <div
             v-else
             class="card-stack note-stack"
@@ -177,14 +179,14 @@
             @mouseleave="onNoteStackLeave"
           >
             <!-- 左箭头 -->
-            <button
+            <div
               v-if="notes.length > 1"
-              class="arrow-btn arrow-left"
+              class="arrow-zone arrow-zone-left"
               @click="notePrev"
               aria-label="上一篇"
             >
               <el-icon><ArrowLeft /></el-icon>
-            </button>
+            </div>
 
             <div
               v-for="(item, i) in notes"
@@ -216,14 +218,14 @@
             </div>
 
             <!-- 右箭头 -->
-            <button
+            <div
               v-if="notes.length > 1"
-              class="arrow-btn arrow-right"
+              class="arrow-zone arrow-zone-right"
               @click="noteNext"
               aria-label="下一篇"
             >
               <el-icon><ArrowRight /></el-icon>
-            </button>
+            </div>
 
             <transition name="detail">
               <div
@@ -447,10 +449,10 @@ function linkStyle(i: number) {
   const n = links.value.length;
   const offset = i - currentLinkIdx.value;
   const abs = Math.abs(offset);
-  // cover flow 排布：左右展开 + 侧面旋转 + 远处下沉（更紧凑的间距）
-  let x = offset * 175;
+  // cover flow 排布：左右展开 + 侧面旋转 + 远处下沉（卡片加大后间距相应放大）
+  let x = offset * 200;
   let y = 0;
-  let z = -abs * 85;
+  let z = -abs * 95;
   let scale = Math.max(0.64, 1 - abs * 0.13);
   let rot = offset * -36;  // 左侧卡 rotateY 正（向右转）、右侧卡负
   let zIdx = 100 - abs;
@@ -458,27 +460,27 @@ function linkStyle(i: number) {
 
   // 鼠标 hover 弹起：该卡大幅前移 + 放大；其他卡维持
   if (hoverIdx.value === i) {
-    z = z + 80;
-    scale = Math.max(scale, 1.1);
-    y = -8;
+    z = z + 90;
+    scale = Math.max(scale, 1.12);
+    y = -10;
     rot = rot * 0.25;  // hover 时旋转减弱（更正面展示）
     zIdx = 1000;
   }
 
   // 拖拽中心卡抽出
   if (dragging.value && dragIdx.value === i) {
-    x = offset * 175 + dragDeltaX.value;
-    z = 130;
-    scale = 1.12;
-    y = -14;
+    x = offset * 200 + dragDeltaX.value;
+    z = 140;
+    scale = 1.15;
+    y = -16;
     rot = dragDeltaX.value * 0.18;
     zIdx = 2000;
   } else if (dragging.value && dragIdx.value === currentLinkIdx.value) {
     // 后方卡（非中心）按重量 abs 下沉
     const weight = abs * 0.45 + 0.2;
     const dragAbs = Math.abs(dragDeltaX.value);
-    y = dragAbs * weight * 0.32;
-    z = -abs * 85 - dragAbs * weight * 0.12;
+    y = dragAbs * weight * 0.35;
+    z = -abs * 95 - dragAbs * weight * 0.12;
     scale = Math.max(0.5, scale - dragAbs * weight * 0.0006);
   }
 
@@ -499,34 +501,34 @@ function noteStyle(i: number) {
   const n = notes.value.length;
   const offset = i - currentNoteIdx.value;
   const abs = Math.abs(offset);
-  let x = offset * 160;
+  let x = offset * 180;
   let y = 0;
-  let z = -abs * 78;
+  let z = -abs * 88;
   let scale = Math.max(0.66, 1 - abs * 0.12);
   let rot = offset * -34;
   let zIdx = 100 - abs;
   let opacity = Math.max(0.4, 1 - abs * 0.16);
 
   if (hoverNoteIdx.value === i) {
-    z = z + 70;
-    scale = Math.max(scale, 1.08);
-    y = -6;
+    z = z + 80;
+    scale = Math.max(scale, 1.1);
+    y = -8;
     rot = rot * 0.25;
     zIdx = 1000;
   }
 
   if (draggingNote.value && dragNoteIdx.value === i) {
-    x = offset * 160 + dragNoteDeltaX.value;
-    z = 125;
-    scale = 1.1;
-    y = -12;
+    x = offset * 180 + dragNoteDeltaX.value;
+    z = 130;
+    scale = 1.12;
+    y = -14;
     rot = dragNoteDeltaX.value * 0.18;
     zIdx = 2000;
   } else if (draggingNote.value && dragNoteIdx.value === currentNoteIdx.value) {
     const weight = abs * 0.45 + 0.2;
     const dragAbs = Math.abs(dragNoteDeltaX.value);
     y = dragAbs * weight * 0.32;
-    z = -abs * 78 - dragAbs * weight * 0.12;
+    z = -abs * 88 - dragAbs * weight * 0.12;
     scale = Math.max(0.55, scale - dragAbs * weight * 0.0006);
   }
 
@@ -807,12 +809,7 @@ onBeforeUnmount(() => {
 }
 .search {
   flex: 1;
-  max-width: 520px;
-}
-.top-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 10px;
+  max-width: 720px;
 }
 
 .dual-pane {
@@ -831,13 +828,19 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px 10px;
+  padding: 14px 18px 12px;
   border-bottom: 1px solid $border-glass;
+  gap: 10px;
 }
 .pane-head-left {
   display: flex;
   align-items: baseline;
   gap: 10px;
+}
+.pane-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .pane-title {
   font-size: 15px;
@@ -853,6 +856,11 @@ onBeforeUnmount(() => {
   color: $text-tertiary;
   opacity: 0.85;
 }
+.pane-create {
+  font-size: 12px;
+  padding: 5px 11px;
+  white-space: nowrap;
+}
 .pane-body {
   flex: 1;
   overflow: hidden;
@@ -860,7 +868,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;  /* 改为垂直居中：轮播图位于所属区域中间部位 */
+  justify-content: center;  /* 轮播图位于所属区域中间部位 */
 }
 .empty {
   text-align: center;
@@ -869,27 +877,31 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-/* ========== 3D 立体堆叠容器（更紧凑） ========== */
+/* ========== 3D 立体堆叠容器（卡片加大） ========== */
 .card-stack {
   position: relative;
   width: 100%;
-  max-width: 340px;  /* 420 → 340，更紧凑 */
-  height: 320px;     /* 380 → 320 */
+  max-width: 380px;   /* 340 → 380，配合卡片加大 */
+  height: 350px;      /* 320 → 350 */
   perspective: 1400px;
-  perspective-origin: 50% 60%;
+  perspective-origin: 50% 55%;
   transform-style: preserve-3d;
+  /* --btn-top：按钮垂直位置，收藏默认在 info 区（卡片下半截） */
+  --btn-top: 215px;
 }
 .note-stack {
-  height: 260px;     /* 320 → 260 */
+  height: 280px;     /* 260 → 280 */
+  /* 笔记按钮居中到卡片中部（卡片高 140 / 2 = 70px） */
+  --btn-top: 70px;
 }
 
-/* ========== 轮播卡片（共享样式） ========== */
+/* ========== 轮播卡片（共享样式，加大尺寸） ========== */
 .stack-card {
   position: absolute;
   top: 0;
   left: 50%;
-  margin-left: -150px;  /* 卡宽 300 / 2 */
-  width: 300px;         /* 360 → 300，更紧凑 */
+  margin-left: -170px;  /* 卡宽 340 / 2 */
+  width: 340px;         /* 300 → 340 */
   border-radius: 16px;
   backface-visibility: hidden;
   cursor: pointer;
@@ -919,14 +931,14 @@ onBeforeUnmount(() => {
 
 /* ========== 收藏卡片 ========== */
 .link-card {
-  height: 280px;       /* 320 → 280 */
+  height: 310px;       /* 280 → 310 */
   display: flex;
   flex-direction: column;
 }
 .screenshot {
   position: relative;
   width: 100%;
-  height: 150px;       /* 180 → 150 */
+  height: 170px;      /* 150 → 170 */
   background: rgba(0, 0, 0, 0.25);
   overflow: hidden;
   border-bottom: 1px solid $border-subtle;
@@ -950,10 +962,13 @@ onBeforeUnmount(() => {
 }
 .info {
   flex: 1;
-  padding: 10px 14px 8px;
+  padding: 12px 16px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
+  /* 下半截填充背景色，让 name/url/tags 文字展示更突出 */
+  background: linear-gradient(180deg, rgba(20, 14, 38, 0.45), rgba(20, 14, 38, 0.7));
+  border-top: 1px solid rgba(196, 181, 253, 0.08);
 }
 .name {
   font-size: 14px;
@@ -1042,52 +1057,69 @@ onBeforeUnmount(() => {
 }
 
 /* ========== 左右轮播箭头按钮（更靠边 + hover 更明显 + 防误点热区） ========== */
-.arrow-btn {
+/* ========== 左右轮播箭头（.arrow-zone 父容器方案，彻底修复连续点击穿透） ==========
+   关键：用独立 div.arrow-zone 作为热区层（80x80），::after 画中心 44x44 圆形视觉，
+   el-icon z-index:1 在 ::after 之上。z-index 9999 远高于卡片任何状态
+   （中心卡 hover 1000 / dragging 2000），杜绝"鼠标不动再次点击穿透到下方卡片"。
+   点击 .arrow-zone 任何位置（包括圆形外透明区）都触发 click → prev/next，
+   支持连续点击连续切换。 */
+.arrow-zone {
   position: absolute;
-  top: 50%;
+  top: var(--btn-top, 50%);
   transform: translateY(-50%);
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: rgba(20, 14, 38, 0.6);
-  border: 1px solid rgba(196, 181, 253, 0.22);
-  color: rgba(196, 181, 253, 0.75);
-  font-size: 18px;
-  cursor: pointer;
-  z-index: 1500;
+  width: 80px;        /* 热区 80x80 */
+  height: 80px;
+  z-index: 9999;      /* 远高于卡片，杜绝穿透 */
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(8px);
-  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
-  /* 防误点：用伪元素把按钮的有效点击热区扩大到 88x88（按钮周围 22px 内均归按钮捕获，
-     避免误点击到按钮下方/旁边的卡片导致选错卡片） */
-  &::before {
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  outline: none;
+  /* 中心圆形视觉 */
+  &::after {
     content: '';
     position: absolute;
-    inset: -22px;       /* 热区扩展 22px → 总热区 88x88 */
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
-    cursor: pointer;
-    /* 透明，不影响视觉 */
+    /* 平时填充背景颜色 + 紫色边框 + 紫色发光，让按钮文字（箭头）展示更突出 */
+    background: rgba(20, 14, 38, 0.85);
+    border: 1px solid rgba(196, 181, 253, 0.55);
+    box-shadow: 0 0 14px rgba(167, 139, 250, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 0;
+  }
+  .el-icon {
+    position: relative;
+    z-index: 1;        /* 图标在圆形视觉之上 */
+    color: rgba(196, 181, 253, 1);
+    font-size: 18px;
+    transition: all 0.22s;
   }
   &:hover {
-    color: #fff;
-    border-color: rgba(196, 181, 253, 0.95);
-    background: linear-gradient(135deg, rgba(167, 139, 250, 0.45), rgba(196, 181, 253, 0.32));
-    box-shadow: 0 0 24px rgba(167, 139, 250, 0.6),
-                0 0 0 2px rgba(196, 181, 253, 0.55),
-                inset 0 1px 0 rgba(255, 255, 255, 0.25);
-    transform: translateY(-50%) scale(1.18);
+    &::after {
+      background: linear-gradient(135deg, rgba(167, 139, 250, 0.6), rgba(196, 181, 253, 0.42));
+      border-color: rgba(196, 181, 253, 0.95);
+      box-shadow: 0 0 26px rgba(167, 139, 250, 0.7),
+                  0 0 0 2px rgba(196, 181, 253, 0.6),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.28);
+      transform: scale(1.18);
+    }
+    .el-icon {
+      color: #fff;
+    }
   }
-  &:active {
-    transform: translateY(-50%) scale(0.95);
+  &:active::after {
+    transform: scale(0.95);
   }
 }
-.arrow-left {
-  left: 0;            /* 8px → 0，更靠边 */
+.arrow-zone-left {
+  left: -18px;        /* 圆形中心位于 card-stack 左边缘 4px 处，按钮更靠边 */
 }
-.arrow-right {
-  right: 0;           /* 8px → 0，更靠边 */
+.arrow-zone-right {
+  right: -18px;
 }
 
 .card-actions {
@@ -1127,8 +1159,8 @@ onBeforeUnmount(() => {
 
 /* ========== 笔记卡片 ========== */
 .note-card {
-  height: 120px;       /* 140 → 120，更紧凑 */
-  padding: 12px 16px;
+  height: 140px;       /* 120 → 140，适当加大 */
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
