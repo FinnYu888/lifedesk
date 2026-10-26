@@ -258,3 +258,9 @@ INSERT IGNORE INTO requirement(id, sprint, person_day, task_status, topic, task_
 (11, 'CDS20260927', 3.0, 'done',   '搜索重构', 'Elasticsearch 升级 8.x，重建索引与查询 DSL', '搜索中心', '周涛', 'CIMC-REQ-0801'),
 (12, 'CDS20260927', 2.0, 'done',   '物流接入', '对接顺丰/京东物流轨迹 API 与电子面单', '订单中心', '李明', 'CIMC-REQ-0802'),
 (13, 'CDS20260927', 1.5, 'done',   '退款流程', '原路退款与余额退款分支处理，异常退款工单化', '支付中心', '陈静', 'CIMC-REQ-0803');
+
+-- ========== 自定义菜单 ==========
+-- 预置一条菜单：把 RPT 接口测试用例平台作为侧栏菜单挂进 LifeDesk，
+-- 点击后通过 iframe 嵌入当前系统展示（不跳转新窗口）
+INSERT IGNORE INTO custom_menu(id, name, url, sort_no, icon) VALUES
+(1, 'RPT 接口测试用例平台', 'http://10.139.92.114:8098/#/login', 0, 'Link');

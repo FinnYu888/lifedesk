@@ -363,6 +363,19 @@ CREATE TABLE IF NOT EXISTS english_task (
     INDEX idx_category_deleted(category, deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='英语提升任务';
 
+-- ========== 自定义菜单（侧栏挂载外部网站，iframe 嵌入当前系统展示） ==========
+CREATE TABLE IF NOT EXISTS custom_menu (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(128) NOT NULL COMMENT '菜单名（显示在侧栏）',
+    url VARCHAR(2000) NOT NULL COMMENT '网站地址，点击后通过 iframe 嵌入当前系统展示',
+    sort_no INT DEFAULT 0 COMMENT '排序号，越小越靠前',
+    icon VARCHAR(64) DEFAULT NULL COMMENT '图标枚举（前端 Element Plus 图标名，可选，缺省用 Link）',
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_sort_deleted(sort_no, deleted)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='自定义菜单';
+
 -- ========== 增量字段迁移说明 ==========
 -- CREATE TABLE IF NOT EXISTS 不会更新已存在的表，新增字段由 DatabaseMigration Runner
 -- 在启动后用 JDBC 检查 INFORMATION_SCHEMA 并 ALTER TABLE ADD COLUMN（精确无副作用）。

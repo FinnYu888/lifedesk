@@ -59,6 +59,14 @@ const routes: RouteRecordRaw[] = [
         name: "Health",
         component: () => import("@/views/health/index.vue"),
         meta: { title: "个人健康" }
+      },
+      {
+        // 自定义菜单嵌入页：通过 iframe 把目标网站嵌入当前系统展示
+        // url/name/id 由 MainLayout 在 router.push 的 query 里携带
+        path: "custom",
+        name: "CustomMenu",
+        component: () => import("@/views/custommenu/index.vue"),
+        meta: { title: "自定义菜单" }
       }
     ]
   }
