@@ -44,10 +44,19 @@
         {{ rptCurrent.tenantName || '该租户' }}数据拉取失败：{{ rptCurrent.error || '未知错误' }}
       </div>
 
-      <!-- 网格视图（截图1样式：模块卡 + 进度条 + 用例/通过/失败） -->
+      <!-- 网格视图（截图1样式：模块卡 + 进度条 + 用例/通过/失败；点击卡片展开用例列表） -->
       <div v-else-if="rptView === 'grid'" class="pr-grid">
-        <div v-for="m in rptCurrent?.modules || []" :key="m.bizModule" class="pr-cell">
-          <div class="pr-cell-name">{{ m.bizModuleLabel }}</div>
+        <div
+          v-for="m in rptCurrent?.modules || []"
+          :key="m.bizModule"
+          class="pr-cell"
+          :class="{ open: expandedModule === m.bizModule }"
+          @click="toggleCase(m.bizModule)"
+        >
+          <div class="pr-cell-name">
+            {{ m.bizModuleLabel }}
+            <span v-if="m.failedCount > 0" class="pr-cell-failed">{{ m.failedCount }} 失败</span>
+          </div>
           <div class="pr-cell-bar">
             <div class="pr-cell-track">
               <div
@@ -62,13 +71,59 @@
         <div v-if="!rptCurrent?.modules?.length" class="pr-empty">暂无模块数据</div>
       </div>
 
-      <!-- 列表视图（截图2样式：模块名 + 通过率 + 行尾箭头） -->
-      <div v-else class="pr-list">
-        <div v-for="m in rptCurrent?.modules || []" :key="m.bizModule" class="pr-row">
-          <span class="pr-row-name">{{ m.bizModuleLabel }}</span>
-          <span class="pr-row-rate">通过率 {{ m.passRate.toFixed(2) }}%</span>
-          <el-icon class="pr-row-arrow"><ArrowRight /></el-icon>
+      <!-- 网格视图下展开的用例列表（通栏，失败用例排前） -->
+      <div v-if="rptView === 'grid' && expandedModule && rptCurrent?.success" class="pr-cases">
+        <div class="pr-cases-title">
+          {{ rptCurrent?.modules?.find(m => m.bizModule === expandedModule)?.bizModuleLabel }} · 用例列表
+          <span class="pr-cases-tip">失败用例优先展示，点击模块卡收起</span>
         </div>
+        <div class="pr-case-head">
+          <span>测试用例</span><span>最新运行</span><span>完成时间</span>
+        </div>
+        <div
+          v-for="c in sortedCases(expandedModule)"
+          :key="c.id"
+          class="pr-case-row"
+          :class="{ failed: c.lastStatus === 'FAILED' }"
+        >
+          <span class="pr-case-name">{{ c.name }}</span>
+          <span class="pr-case-status" :class="c.lastStatus === 'PASSED' ? 'ok' : c.lastStatus === 'FAILED' ? 'bad' : 'unknown'">
+            {{ statusText(c.lastStatus) }}
+          </span>
+          <span class="pr-case-time">{{ c.lastFinishedAt || "-" }}</span>
+        </div>
+        <div v-if="!sortedCases(expandedModule).length" class="pr-empty">该模块暂无用例</div>
+      </div>
+
+      <!-- 列表视图（截图2样式：模块名 + 通过率 + 行尾箭头；点击行展开用例列表） -->
+      <div v-else class="pr-list">
+        <template v-for="m in rptCurrent?.modules || []" :key="m.bizModule">
+          <div class="pr-row" @click="toggleCase(m.bizModule)">
+            <span class="pr-row-name">{{ m.bizModuleLabel }}</span>
+            <span v-if="m.failedCount > 0" class="pr-row-failed">{{ m.failedCount }} 失败</span>
+            <span class="pr-row-rate">通过率 {{ m.passRate.toFixed(2) }}%</span>
+            <el-icon class="pr-row-arrow" :class="{ open: expandedModule === m.bizModule }"><ArrowDown /></el-icon>
+          </div>
+          <!-- 行内展开的用例列表（失败用例排前） -->
+          <div v-if="expandedModule === m.bizModule" class="pr-cases pr-cases-inline">
+            <div class="pr-case-head">
+              <span>测试用例</span><span>最新运行</span><span>完成时间</span>
+            </div>
+            <div
+              v-for="c in sortedCases(m.bizModule)"
+              :key="c.id"
+              class="pr-case-row"
+              :class="{ failed: c.lastStatus === 'FAILED' }"
+            >
+              <span class="pr-case-name">{{ c.name }}</span>
+              <span class="pr-case-status" :class="c.lastStatus === 'PASSED' ? 'ok' : c.lastStatus === 'FAILED' ? 'bad' : 'unknown'">
+                {{ statusText(c.lastStatus) }}
+              </span>
+              <span class="pr-case-time">{{ c.lastFinishedAt || "-" }}</span>
+            </div>
+            <div v-if="!sortedCases(m.bizModule).length" class="pr-empty">该模块暂无用例</div>
+          </div>
+        </template>
         <div v-if="!rptCurrent?.modules?.length" class="pr-empty">暂无模块数据</div>
       </div>
     </div>
@@ -466,11 +521,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import StatCard from "@/components/StatCard.vue";
 import ProgressBar from "@/components/ProgressBar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Edit, Refresh, Delete, Grid, Menu, ArrowRight } from "@element-plus/icons-vue";
+import { Plus, Edit, Refresh, Delete, Grid, Menu, ArrowDown } from "@element-plus/icons-vue";
 import {
   fetchProjectStat,
   fetchProjectActive,
@@ -540,6 +595,7 @@ const rptData = ref<RptTenantPassRate[]>([]);
 const rptLoading = ref(false);
 const rptTenant = ref<number>(29); // 默认看盐田
 const rptView = ref<"grid" | "list">("grid");
+const expandedModule = ref<string>(""); // 当前展开用例列表的模块 bizModule
 
 /** 切换器选项：后端返回租户名如"盐田堆场"，展示用短名 */
 const rptTenants = computed(() =>
@@ -570,7 +626,35 @@ async function loadRptPassRate() {
 }
 
 function onRptTenantChange() {
-  /* 仅切换展示，无需重新请求（双租户数据已一次拉回） */
+  expandedModule.value = ""; // 切租户收起展开区
+}
+
+// 切视图收起展开区（两个视图的展开区位置不同，避免状态错位）
+watch(rptView, () => {
+  expandedModule.value = "";
+});
+
+/** 点击模块卡/行：展开或收起用例列表 */
+function toggleCase(bizModule: string) {
+  expandedModule.value = expandedModule.value === bizModule ? "" : bizModule;
+}
+
+/** 失败用例优先排序：FAILED 最前，其次其他状态，PASSED 最后；同状态按完成时间倒序 */
+function sortedCases(bizModule: string) {
+  const m = rptCurrent.value?.modules?.find(x => x.bizModule === bizModule);
+  const list = [...(m?.cases || [])];
+  const rank = (s?: string) => (s === "FAILED" ? 0 : s === "PASSED" ? 2 : 1);
+  list.sort((a, b) => {
+    const d = rank(a.lastStatus) - rank(b.lastStatus);
+    if (d !== 0) return d;
+    return (b.lastFinishedAt || "").localeCompare(a.lastFinishedAt || "");
+  });
+  return list;
+}
+
+/** 运行状态中文文案 */
+function statusText(s?: string) {
+  return s === "PASSED" ? "通过" : s === "FAILED" ? "失败" : s || "-";
 }
 const syncingId = ref<number | null>(null);
 const deletingId = ref<number | null>(null);
@@ -1246,6 +1330,22 @@ onMounted(() => {
   border-radius: 10px;
   padding: 12px 14px;
   background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  &:hover {
+    border-color: $accent;
+    background: rgba(167, 139, 250, 0.05);
+  }
+  &.open {
+    border-color: $accent;
+    background: rgba(167, 139, 250, 0.08);
+  }
+}
+.pr-cell-failed,
+.pr-row-failed {
+  font-size: 11px;
+  color: $color-danger;
+  margin-left: 6px;
 }
 .pr-cell-name {
   font-size: 14px;
@@ -1319,6 +1419,11 @@ onMounted(() => {
 .pr-row-arrow {
   margin-left: auto;
   color: $text-tertiary;
+  transition: transform 0.2s;
+  &.open {
+    transform: rotate(180deg);
+    color: $accent;
+  }
 }
 .pr-empty {
   padding: 24px 0;
@@ -1328,6 +1433,97 @@ onMounted(() => {
 }
 .pr-error {
   color: $color-danger;
+}
+
+/* ===== 展开的用例列表（失败优先） ===== */
+.pr-cases {
+  margin-top: 12px;
+  border: 1px solid $border-subtle;
+  border-radius: 10px;
+  overflow: hidden;
+  &.pr-cases-inline {
+    margin-top: 0;
+    margin-bottom: 8px;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+}
+.pr-cases-title {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: $text-primary;
+  border-bottom: 1px solid $border-subtle;
+}
+.pr-cases-tip {
+  font-size: 11px;
+  font-weight: 400;
+  color: $text-tertiary;
+  margin-left: 10px;
+}
+.pr-case-head,
+.pr-case-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 170px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+}
+.pr-case-head {
+  font-size: 12px;
+  color: $text-tertiary;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid $border-subtle;
+}
+.pr-case-row {
+  font-size: 13px;
+  color: $text-secondary;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  &:last-of-type {
+    border-bottom: none;
+  }
+  &:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  &.failed {
+    background: rgba(248, 113, 113, 0.06);
+    &:hover {
+      background: rgba(248, 113, 113, 0.1);
+    }
+    .pr-case-name {
+      color: $text-primary;
+    }
+  }
+}
+.pr-case-name {
+  color: $text-secondary;
+  word-break: break-all;
+}
+.pr-case-status {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 10px;
+  text-align: center;
+  justify-self: start;
+  &.ok {
+    color: #34d399;
+    background: rgba(52, 211, 153, 0.12);
+  }
+  &.bad {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.14);
+    font-weight: 600;
+  }
+  &.unknown {
+    color: $text-tertiary;
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+.pr-case-time {
+  font-size: 12px;
+  color: $text-tertiary;
+  white-space: nowrap;
 }
 
 .card-head {

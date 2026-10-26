@@ -1,5 +1,14 @@
 import { http } from "@/utils/http";
 
+/** RPT 单条测试用例的最近运行状态 */
+export interface RptCaseStat {
+  id: number;
+  name: string;
+  caseType: string;
+  lastStatus: string;
+  lastFinishedAt: string;
+}
+
 /** RPT 单个业务模块的用例通过率统计 */
 export interface RptModuleStat {
   bizModule: string;
@@ -8,6 +17,8 @@ export interface RptModuleStat {
   passedCount: number;
   failedCount: number;
   passRate: number;
+  /** 模块下用例明细（最近运行状态），点击模块展开查看 */
+  cases: RptCaseStat[];
 }
 
 /** 单个租户（盐田/蛇口）的用例通过率聚合 */

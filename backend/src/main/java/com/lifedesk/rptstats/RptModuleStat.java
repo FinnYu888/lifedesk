@@ -34,6 +34,6 @@ public class RptModuleStat {
     /** 通过率（百分数，如 93.38） */
     private Double passRate;
 
-    /** RPT 返回的完整 cases 明细，本端不消费但保留结构透传能力（当前卡片仅用统计字段） */
-    private List<Object> cases;
+    /** 该模块下的用例明细（最近运行状态），供前端点击展开查看；失败用例由前端优先排序 */
+    private List<RptCaseStat> cases;
 }
