@@ -130,6 +130,21 @@ public class RptStatsService {
                 s.setPassedCount(m.path("passedCount").asInt(0));
                 s.setFailedCount(m.path("failedCount").asInt(0));
                 s.setPassRate(m.path("passRate").asDouble(0));
+                // 用例明细（name/lastStatus/lastFinishedAt），供前端点击模块展开查看
+                List<RptCaseStat> cases = new ArrayList<>();
+                JsonNode caseArr = m.path("cases");
+                if (caseArr.isArray()) {
+                    for (JsonNode c : caseArr) {
+                        RptCaseStat cs = new RptCaseStat();
+                        cs.setId(c.path("id").asLong());
+                        cs.setName(c.path("name").asText(null));
+                        cs.setCaseType(c.path("caseType").asText(null));
+                        cs.setLastStatus(c.path("lastStatus").asText(null));
+                        cs.setLastFinishedAt(c.path("lastFinishedAt").asText(null));
+                        cases.add(cs);
+                    }
+                }
+                s.setCases(cases);
                 list.add(s);
             }
         }
