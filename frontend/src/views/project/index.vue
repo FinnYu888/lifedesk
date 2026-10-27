@@ -1546,10 +1546,31 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 14px;
 }
-/* 列底空白依附区：平时透明，拖拽经过时高亮 */
+/* 区域卡：flex-grow 让较矮一列的卡片均摊多余高度，
+   自动长高到与另一列总高一致（互相追赶、双向自适应） */
+.region {
+  position: relative;
+  flex: 1 0 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.15s, opacity 0.15s;
+  &.armed {
+    cursor: grabbing;
+    box-shadow: 0 0 0 1px $border-accent;
+    user-select: none;
+  }
+  &.dragging {
+    opacity: 0.4;
+  }
+  &.drop-target {
+    outline: 2px dashed $accent;
+    outline-offset: 2px;
+  }
+}
+/* 列底空白依附区：固定小高度拖放带（区域卡已负责填满列高） */
 .col-filler {
-  flex: 1;
-  min-height: 8px;
+  flex: 0 0 12px;
   border-radius: $radius-sm;
   transition: background 0.15s, box-shadow 0.15s;
   &.on {
@@ -1571,30 +1592,16 @@ onBeforeUnmount(() => {
     box-shadow: 0 0 14px rgba(167, 139, 250, 0.35);
   }
 }
-.region {
-  position: relative;
-  min-width: 0;
-  transition: box-shadow 0.15s, opacity 0.15s;
-  &.armed {
-    cursor: grabbing;
-    box-shadow: 0 0 0 1px $border-accent;
-    user-select: none;
-  }
-  &.dragging {
-    opacity: 0.4;
-  }
-  &.drop-target {
-    outline: 2px dashed $accent;
-    outline-offset: 2px;
-  }
-}
-/* 窄屏：列纵向堆叠，保持内容可读 */
+/* 窄屏：列纵向堆叠，保持内容可读；单列下无高度对齐需求，取消拉伸 */
 @media (max-width: 900px) {
   .board {
     flex-direction: column;
   }
   .board-col {
     min-width: 0;
+  }
+  .region {
+    flex: 0 0 auto;
   }
   .edge-zone {
     display: none;
@@ -1611,10 +1618,11 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
-/* 模块卡网格：每模块一张小卡，点击展开用例列表 */
+/* 模块卡网格：每模块一张小卡，点击展开用例列表。
+   auto-fit：宽屏卡片自动拉伸填满整行，窄屏自动换行为更少列，始终铺满可用宽度 */
 .pr-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
 }
 .pr-cell {
