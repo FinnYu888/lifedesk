@@ -110,8 +110,15 @@ public class RequirementService {
      * <p>{@code wetrans.cimc.cn/gateway/} 开头的接口鉴权信息每日可能过期，
      * 前端在"我的需求"卡片可输入最新 authorization 动态覆盖。
      * 优先级：currentToken > remoteToken（配置文件兜底）。</p>
+     *
+     * <p><b>持久化</b>：设置/清空时同步写入本地文件（{@link #tokenPath()}），
+     * 服务重启时在 {@link #init()} 中自动加载，保证"保存后每次刷新/请求都用它"。</p>
      */
     private final AtomicReference<String> currentToken = new AtomicReference<>(null);
+
+    /** 持久化文件路径覆盖（可选配置，默认 ~/.lifedesk/requirement-auth.token） */
+    @Value("${requirement.token-file:}")
+    private String tokenFile;
 
     /** 是否启用远程接口；默认 false，使用本地 mock 表 */
     @Value("${requirement.remote.enabled:false}")
@@ -194,10 +201,54 @@ public class RequirementService {
 
     @PostConstruct
     public void init() {
+        // 启动时从本地文件恢复上次保存的 authorization（覆盖远程配置兜底 token）
+        String saved = loadTokenFromFile();
+        if (saved != null && !saved.isEmpty()) {
+            currentToken.set(saved);
+            log.info("[Authorization] 已从本地文件恢复 authorization（长度 {}）", saved.length());
+        }
         log.info("RequirementService 初始化：remoteEnabled={}, project={}, pageSize={}, userIds={}, statusList={}",
                 remoteEnabled, remoteProject, remotePageSize,
                 remoteUserIds == null || remoteUserIds.isEmpty() ? "无" : remoteUserIds,
                 remoteStatusListCsv);
+    }
+
+    /** 持久化文件路径：默认 ~/.lifedesk/requirement-auth.token，可用 requirement.token-file 覆盖 */
+    private java.nio.file.Path tokenPath() {
+        if (tokenFile != null && !tokenFile.trim().isEmpty()) {
+            return java.nio.file.Paths.get(tokenFile.trim());
+        }
+        return java.nio.file.Paths.get(System.getProperty("user.home"), ".lifedesk", "requirement-auth.token");
+    }
+
+    /** 从本地文件读取持久化的 authorization；不存在或读取失败返回 null */
+    private String loadTokenFromFile() {
+        try {
+            java.nio.file.Path p = tokenPath();
+            if (!java.nio.file.Files.exists(p)) return null;
+            byte[] bytes = java.nio.file.Files.readAllBytes(p);
+            String s = new String(bytes, java.nio.charset.StandardCharsets.UTF_8).trim();
+            return s.isEmpty() ? null : s;
+        } catch (Exception e) {
+            log.warn("[Authorization] 读取持久化文件失败：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 把 authorization 写入本地文件（覆盖旧值）；传 null/空则删除文件 */
+    private void saveTokenToFile(String token) {
+        try {
+            java.nio.file.Path p = tokenPath();
+            if (token == null || token.isEmpty()) {
+                java.nio.file.Files.deleteIfExists(p);
+                return;
+            }
+            java.nio.file.Files.createDirectories(p.getParent());
+            java.nio.file.Files.write(p, token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            // 持久化失败不阻断内存设置，仅告警（下次重启需重新输入）
+            log.warn("[Authorization] 持久化写入失败：{}", e.getMessage());
+        }
     }
 
     /**
@@ -219,10 +270,12 @@ public class RequirementService {
     public void setAuthorization(String token) {
         if (token == null || token.isEmpty()) {
             currentToken.set(null);
-            log.info("动态 authorization 已清空");
+            saveTokenToFile(null);
+            log.info("动态 authorization 已清空（含持久化文件）");
         } else {
             currentToken.set(token);
-            log.info("动态 authorization 已更新（长度 {}）", token.length());
+            saveTokenToFile(token);
+            log.info("动态 authorization 已更新并持久化（长度 {}）", token.length());
         }
     }
 
@@ -237,6 +290,7 @@ public class RequirementService {
         s.put("hasFallbackToken", remoteToken != null && !remoteToken.isEmpty());
         s.put("hasEffectiveToken", getEffectiveToken() != null && !getEffectiveToken().isEmpty());
         s.put("source", (cur != null && !cur.isEmpty()) ? "dynamic" : (remoteToken != null && !remoteToken.isEmpty() ? "fallback" : "none"));
+        s.put("persisted", java.nio.file.Files.exists(tokenPath()));
         return s;
     }
 

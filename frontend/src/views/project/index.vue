@@ -622,7 +622,9 @@ const authStatusText = computed(() => {
     return "未设置 authorization";
   }
   if (authStatus.value.source === "dynamic") {
-    return "已设置动态 authorization（前端输入）";
+    return authStatus.value.persisted
+      ? "已保存 authorization（重启后仍生效）"
+      : "已设置动态 authorization（前端输入）";
   }
   return "使用配置文件兜底 authorization";
 });

@@ -67,6 +67,8 @@ export interface RequirementAuthStatus {
   hasEffectiveToken: boolean;
   /** 当前 token 来源：dynamic=前端动态设置 / fallback=配置文件兜底 / none=未设置 */
   source: "dynamic" | "fallback" | "none";
+  /** 是否已持久化到本地文件（后端重启后仍生效） */
+  persisted?: boolean;
 }
 
 /**
