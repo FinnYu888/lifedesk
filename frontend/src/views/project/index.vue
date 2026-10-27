@@ -128,12 +128,24 @@
       </div>
     </div>
 
-    <!-- 可拖拽换位的区域看板：长按卡片约 0.3s 进入拖拽，松手落到目标区域即换位；
-         布局为独立双列（宽屏两列 / 窄屏一列，随屏幕宽度自适应），
-         每列内部紧凑堆叠，各区域宽度自适应列宽，不会出现大空隙 -->
-    <div ref="boardEl" class="board">
-      <div v-for="(colRegionsArr, colIdx) in boardColumns" :key="colIdx" class="board-col">
-        <template v-for="rid in colRegionsArr" :key="rid">
+    <!-- 区域自由排版看板：
+         1) 长按卡片约 0.3s 进入拖拽；
+         2) 拖到另一个区域上松手 → 与其换位；
+         3) 拖到某列下方空白处松手 → 追加到该列底部；
+         4) 拖到页面左/右边缘依附区松手 → 在该侧新建一列（靠边依附）。
+         列宽均分自适应，拖动后各区域大小随布局自动调整 -->
+    <div class="board">
+      <!-- 左缘依附区：拖拽时贴页面左侧出现，松手新建列 -->
+      <div
+        v-show="draggingRegion"
+        class="edge-zone"
+        :class="{ on: edgeTarget === 'left' }"
+        @dragover="onEdgeDragOver('left', $event)"
+        @dragleave="edgeTarget = null"
+        @drop="onEdgeDrop('left', $event)"
+      ></div>
+      <div v-for="(col, ci) in regionLayout" :key="ci" class="board-col">
+        <template v-for="rid in col" :key="rid">
           <!-- 活跃项目列表 -->
           <div
             v-if="rid === 'projects'"
@@ -417,7 +429,24 @@
         </div>
           </div>
         </template>
+        <!-- 列内空白依附区：填满列剩余高度，拖到此处松手 → 区域追加到该列底部 -->
+        <div
+          class="col-filler"
+          :class="{ on: colDropTarget === ci }"
+          @dragover="onColDragOver(ci, $event)"
+          @dragleave="colDropTarget = null"
+          @drop="onColDrop(ci, $event)"
+        ></div>
       </div>
+      <!-- 右缘依附区：拖拽时贴页面右侧出现，松手新建列 -->
+      <div
+        v-show="draggingRegion"
+        class="edge-zone"
+        :class="{ on: edgeTarget === 'right' }"
+        @dragover="onEdgeDragOver('right', $event)"
+        @dragleave="edgeTarget = null"
+        @drop="onEdgeDrop('right', $event)"
+      ></div>
     </div>
 
     <!-- 新建/编辑项目弹窗 -->
@@ -1315,44 +1344,85 @@ function syncTagCls(p: any) {
   }
 }
 
-// ===== 区域看板：长按拖拽换位 + 列数自适应屏幕宽度 =====
+// ===== 区域自由排版看板：长按拖拽，支持换位 / 追加到列底 / 左右边缘新建列依附 =====
 type RegionId = "projects" | "reqs" | "milestones" | "commits";
-const REGION_ORDER_KEY = "lifedesk-project-region-order";
-const DEFAULT_REGIONS: RegionId[] = ["projects", "reqs", "milestones", "commits"];
+const REGION_LAYOUT_KEY = "lifedesk-project-region-layout";
+const REGION_ORDER_KEY_LEGACY = "lifedesk-project-region-order";
+const ALL_REGIONS: RegionId[] = ["projects", "reqs", "milestones", "commits"];
+const DEFAULT_LAYOUT: RegionId[][] = [
+  ["projects", "milestones"],
+  ["reqs", "commits"]
+];
 
-function loadRegionOrder(): RegionId[] {
+/** 读取已保存布局；兼容旧版扁平顺序（按双列轮转转换为列结构） */
+function loadRegionLayout(): RegionId[][] {
   try {
-    const arr = JSON.parse(localStorage.getItem(REGION_ORDER_KEY) || "[]");
-    if (!Array.isArray(arr)) return [...DEFAULT_REGIONS];
-    const valid = arr.filter((x): x is RegionId => DEFAULT_REGIONS.includes(x));
-    // 兜底：新版本新增的区域追加到末尾
-    return [...valid, ...DEFAULT_REGIONS.filter((x) => !valid.includes(x))];
+    const saved = localStorage.getItem(REGION_LAYOUT_KEY);
+    if (saved) {
+      const arr = JSON.parse(saved);
+      if (Array.isArray(arr) && arr.length > 0) {
+        const cols = arr
+          .filter(Array.isArray)
+          .map((c: unknown[]) => c.filter((x): x is RegionId => ALL_REGIONS.includes(x as RegionId)))
+          .filter((c: RegionId[]) => c.length > 0);
+        if (cols.length > 0) {
+          // 兜底：新增区域追加到最后一列
+          const flat = cols.flat();
+          const missing = ALL_REGIONS.filter((x) => !flat.includes(x));
+          if (missing.length) cols[cols.length - 1].push(...missing);
+          return cols;
+        }
+      }
+    }
+    // 旧版扁平顺序迁移
+    const legacy = localStorage.getItem(REGION_ORDER_KEY_LEGACY);
+    if (legacy) {
+      const arr = JSON.parse(legacy);
+      if (Array.isArray(arr)) {
+        const valid = arr.filter((x): x is RegionId => ALL_REGIONS.includes(x));
+        const rest = ALL_REGIONS.filter((x) => !valid.includes(x));
+        const cols: RegionId[][] = [[], []];
+        [...valid, ...rest].forEach((id, i) => cols[i % 2].push(id));
+        return cols;
+      }
+    }
   } catch {
-    return [...DEFAULT_REGIONS];
+    /* 忽略损坏数据，用默认布局 */
+  }
+  return DEFAULT_LAYOUT.map((c) => [...c]);
+}
+
+const regionLayout = ref<RegionId[][]>(loadRegionLayout());
+
+function saveRegionLayout() {
+  localStorage.setItem(REGION_LAYOUT_KEY, JSON.stringify(regionLayout.value));
+}
+
+/** 在布局中定位某区域 → [列下标, 行下标] */
+function locate(id: RegionId): [number, number] {
+  for (let ci = 0; ci < regionLayout.value.length; ci++) {
+    const ri = regionLayout.value[ci].indexOf(id);
+    if (ri >= 0) return [ci, ri];
+  }
+  return [-1, -1];
+}
+
+/** 从布局中摘除某区域，并清理空列（至少保留 1 列） */
+function detach(id: RegionId): void {
+  const [ci, ri] = locate(id);
+  if (ci < 0) return;
+  regionLayout.value[ci].splice(ri, 1);
+  if (regionLayout.value[ci].length === 0 && regionLayout.value.length > 1) {
+    regionLayout.value.splice(ci, 1);
   }
 }
-
-const regionOrder = ref<RegionId[]>(loadRegionOrder());
-
-function saveRegionOrder() {
-  localStorage.setItem(REGION_ORDER_KEY, JSON.stringify(regionOrder.value));
-}
-
-/** 看板容器：ResizeObserver 监测宽度 → 决定列数（>=1100px 两列，否则单列） */
-const boardEl = ref<HTMLElement | null>(null);
-const boardCols = ref(2);
-let boardRO: ResizeObserver | null = null;
-
-const boardColumns = computed<RegionId[][]>(() => {
-  const cols: RegionId[][] = Array.from({ length: boardCols.value }, () => []);
-  regionOrder.value.forEach((id, i) => cols[i % boardCols.value].push(id));
-  return cols;
-});
 
 // ===== 长按进入拖拽（避免与卡片内点击/滚动冲突） =====
 const armedRegion = ref<RegionId | null>(null); // 长按后武装：draggable 生效
 const draggingRegion = ref<RegionId | null>(null);
-const dropTarget = ref<RegionId | null>(null);
+const dropTarget = ref<RegionId | null>(null); // 区域换位目标
+const colDropTarget = ref<number | null>(null); // 列底空白追加目标
+const edgeTarget = ref<"left" | "right" | null>(null); // 左右边缘新建列目标
 let pressTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onRegionMouseDown(id: RegionId, e: MouseEvent) {
@@ -1396,32 +1466,92 @@ function onRegionDragOver(id: RegionId, e: DragEvent) {
   e.preventDefault();
   if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
   dropTarget.value = id;
+  colDropTarget.value = null;
+  edgeTarget.value = null;
 }
 
 function onRegionDragLeave(id: RegionId) {
   if (dropTarget.value === id) dropTarget.value = null;
 }
 
-/** 松手换位：拖起区域与目标区域互换位置，看板列布局自动重排（宽度随新位置自适应） */
+/** 松手换位：拖起区域与目标区域互换位置（可跨列），列宽随新布局自动均分 */
 function onRegionDrop(id: RegionId, e: DragEvent) {
   e.preventDefault();
   const from = draggingRegion.value;
   dropTarget.value = null;
   if (!from || from === id) return;
-  const arr = [...regionOrder.value];
-  const fi = arr.indexOf(from);
-  const ti = arr.indexOf(id);
+  const layout = regionLayout.value.map((c) => [...c]);
+  let fi = -1, ri = -1, ti = -1, tj = -1;
+  layout.forEach((c, i) => {
+    const a = c.indexOf(from);
+    if (a >= 0) { fi = i; ri = a; }
+    const b = c.indexOf(id);
+    if (b >= 0) { ti = i; tj = b; }
+  });
   if (fi < 0 || ti < 0) return;
-  arr[fi] = id;
-  arr[ti] = from;
-  regionOrder.value = arr;
-  saveRegionOrder();
+  layout[fi][ri] = id;
+  layout[ti][tj] = from;
+  regionLayout.value = layout;
+  saveRegionLayout();
+}
+
+/** 列底空白：dragover 高亮该列 */
+function onColDragOver(ci: number, e: DragEvent) {
+  if (!draggingRegion.value) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  colDropTarget.value = ci;
+  dropTarget.value = null;
+  edgeTarget.value = null;
+}
+
+/** 拖到某列空白处松手 → 区域追加到该列底部 */
+function onColDrop(ci: number, e: DragEvent) {
+  e.preventDefault();
+  const from = draggingRegion.value;
+  colDropTarget.value = null;
+  if (!from) return;
+  const [fci] = locate(from);
+  if (fci === ci) return; // 已在该列，无需变动
+  // 先捕获目标列引用：detach 可能移除空源列导致列下标偏移
+  const targetCol = regionLayout.value[ci];
+  detach(from);
+  targetCol.push(from);
+  regionLayout.value = [...regionLayout.value];
+  saveRegionLayout();
+}
+
+/** 左右边缘依附区：dragover 高亮 */
+function onEdgeDragOver(side: "left" | "right", e: DragEvent) {
+  if (!draggingRegion.value) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  edgeTarget.value = side;
+  dropTarget.value = null;
+  colDropTarget.value = null;
+}
+
+/** 拖到页面左/右边缘松手 → 在该侧新建一列（靠边依附），原列变空则自动清理 */
+function onEdgeDrop(side: "left" | "right", e: DragEvent) {
+  e.preventDefault();
+  const from = draggingRegion.value;
+  edgeTarget.value = null;
+  if (!from) return;
+  detach(from);
+  if (side === "left") {
+    regionLayout.value = [[from], ...regionLayout.value];
+  } else {
+    regionLayout.value = [...regionLayout.value, [from]];
+  }
+  saveRegionLayout();
 }
 
 function onRegionDragEnd() {
   draggingRegion.value = null;
   armedRegion.value = null;
   dropTarget.value = null;
+  colDropTarget.value = null;
+  edgeTarget.value = null;
   clearPressTimer();
 }
 
@@ -1435,18 +1565,11 @@ function regionCls(id: RegionId): Record<string, boolean> {
 }
 
 onMounted(() => {
-  boardRO = new ResizeObserver((entries) => {
-    const w = entries[0]?.contentRect.width || 0;
-    boardCols.value = w >= 1100 ? 2 : 1;
-  });
-  if (boardEl.value) boardRO.observe(boardEl.value);
   load();
   loadRptPassRate();
 });
 
 onBeforeUnmount(() => {
-  boardRO?.disconnect();
-  boardRO = null;
   clearPressTimer();
 });
 </script>
@@ -1460,18 +1583,43 @@ onBeforeUnmount(() => {
   margin-bottom: 14px;
 }
 
-/* ===== 区域看板：独立双列，列内紧凑堆叠（14px 间距），不会出现大空隙 ===== */
+/* ===== 区域自由排版看板：多列均分，列内紧凑堆叠（14px 间距），不会出现大空隙 ===== */
 .board {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch; /* 各列等高，列底空白依附区自动填充剩余高度 */
   gap: 14px;
 }
 .board-col {
-  flex: 1;
-  min-width: 0; /* 允许列内表格/内容随宽度收缩 */
+  flex: 1 1 0;
+  min-width: 260px; /* 列数多时保持可读宽度，超出横向滚动 */
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+/* 列底空白依附区：平时透明，拖拽经过时高亮 */
+.col-filler {
+  flex: 1;
+  min-height: 8px;
+  border-radius: $radius-sm;
+  transition: background 0.15s, box-shadow 0.15s;
+  &.on {
+    background: rgba(167, 139, 250, 0.08);
+    box-shadow: inset 0 0 0 2px $border-accent;
+  }
+}
+/* 左右边缘依附区：仅拖拽时出现（v-show），贴页面两侧 */
+.edge-zone {
+  flex-shrink: 0;
+  width: 26px;
+  align-self: stretch;
+  border-radius: $radius-sm;
+  border: 2px dashed rgba(167, 139, 250, 0.35);
+  transition: all 0.15s;
+  &.on {
+    background: rgba(167, 139, 250, 0.12);
+    border-color: $accent;
+    box-shadow: 0 0 14px rgba(167, 139, 250, 0.35);
+  }
 }
 .region {
   position: relative;
@@ -1488,6 +1636,18 @@ onBeforeUnmount(() => {
   &.drop-target {
     outline: 2px dashed $accent;
     outline-offset: 2px;
+  }
+}
+/* 窄屏：列纵向堆叠，保持内容可读 */
+@media (max-width: 900px) {
+  .board {
+    flex-direction: column;
+  }
+  .board-col {
+    min-width: 0;
+  }
+  .edge-zone {
+    display: none;
   }
 }
 
