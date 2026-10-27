@@ -1655,6 +1655,11 @@ onBeforeUnmount(() => {
 .ov-metric.teal   .ov-value { color: #2dd4bf; }
 .ov-metric.amber  .ov-value { color: #fbbf24; }
 .ov-metric.rose   .ov-value { color: #f472b6; }
+/* 奶白主题：浅色数字（琥珀/青）在奶白底上对比不足，换深色系 */
+html[data-theme="cream"] .ov-metric.violet .ov-value { color: #7c5cd6; }
+html[data-theme="cream"] .ov-metric.teal   .ov-value { color: #2a8f78; }
+html[data-theme="cream"] .ov-metric.amber  .ov-value { color: #b07d1e; }
+html[data-theme="cream"] .ov-metric.rose   .ov-value { color: #c94f7c; }
 
 .ov-sub {
   display: flex;
@@ -2557,6 +2562,26 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.05) !important;
   border-color: rgba(255, 255, 255, 0.12) !important;
   color: var(--ld-text-secondary, #b8b0d4) !important;
+}
+/* ===== 奶白主题：弹窗底变奶白后，浅紫/浅白文字换成深焦糖保证对比 ===== */
+html[data-theme="cream"] .ld-dialog :deep(.el-radio-button__inner) {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: rgba(150, 118, 64, 0.25) !important;
+}
+html[data-theme="cream"] .ld-dialog :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  background: rgba(192, 138, 62, 0.2) !important;
+  border-color: rgba(192, 138, 62, 0.55) !important;
+  color: #7a5417 !important;
+  box-shadow: 0 0 0 1px rgba(192, 138, 62, 0.35) inset !important;
+}
+html[data-theme="cream"] .ld-dialog :deep(.el-button--primary) {
+  background: var(--el-color-primary, #c08a3e) !important;
+  border-color: var(--el-color-primary, #c08a3e) !important;
+  color: #fff !important;
+}
+html[data-theme="cream"] .ld-dialog :deep(.el-button--default) {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: rgba(150, 118, 64, 0.25) !important;
 }
 .ld-dialog :deep(.el-button--default:hover) {
   background: rgba(255, 255, 255, 0.1) !important;

@@ -1090,4 +1090,67 @@ html[data-theme="cream"] .theme-toggle {
     color: #fff;
   }
 }
+
+/* ===== 奶白主题：修复深色硬编码底（tab 栏/顶栏/工具条）上浅色文字看不清的问题 ===== */
+html[data-theme="cream"] {
+  // 顶栏与 Tab 栏：深紫黑底 → 奶白底（文字用的是主题变量，底变浅后对比恢复正常）
+  .topbar,
+  .menu-tab-bar {
+    background: rgba(250, 245, 234, 0.88);
+  }
+  .tab-toolbar {
+    background: rgba(246, 238, 224, 0.82);
+  }
+  .menu-tab-bar::-webkit-scrollbar-thumb {
+    background: rgba(192, 138, 62, 0.35);
+  }
+  // Tab：白底 + 暖灰字；hover 焦糖 tint
+  .menu-tab {
+    background: rgba(255, 255, 255, 0.72);
+    color: #6b6050;
+    &:hover {
+      background: rgba(192, 138, 62, 0.12);
+      color: #3d3427;
+      border-color: rgba(192, 138, 62, 0.45);
+    }
+  }
+  // 激活 Tab：焦糖渐变 + 深焦糖文字（浅色 $accent-light 在浅底上对比不足，必须换深色）
+  .menu-tab.active {
+    background: linear-gradient(135deg, rgba(192, 138, 62, 0.30), rgba(212, 164, 104, 0.16));
+    color: #7a5417;
+    border-color: rgba(192, 138, 62, 0.55);
+    box-shadow: 0 0 14px rgba(192, 138, 62, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
+  // 关闭按钮 hover 红（不变）在浅底可见，无需覆盖
+  // 侧栏菜单：紫色 tint → 焦糖 tint
+  .nav-item:hover {
+    background: rgba(192, 138, 62, 0.10);
+  }
+  .nav-item-active {
+    background: rgba(192, 138, 62, 0.14);
+    color: #8a6220;
+    border-color: rgba(192, 138, 62, 0.45);
+  }
+  .nav-item:not(.dragging):hover {
+    box-shadow: inset 0 0 0 1px rgba(192, 138, 62, 0.14);
+  }
+  .nav-add {
+    &:hover {
+      background: rgba(192, 138, 62, 0.12);
+    }
+  }
+  // 侧栏健康迷你卡与通用按钮：透明白 → 实白可见
+  .health-mini {
+    background: rgba(255, 255, 255, 0.6);
+  }
+  .ld-btn {
+    background: rgba(255, 255, 255, 0.7);
+    &:hover:not(:disabled) {
+      background: rgba(192, 138, 62, 0.12);
+    }
+  }
+  .ld-btn-primary:hover:not(:disabled) {
+    box-shadow: 0 4px 14px rgba(192, 138, 62, 0.3);
+  }
+}
 </style>
