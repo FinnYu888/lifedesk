@@ -1,8 +1,13 @@
 package com.lifedesk.english.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.lifedesk.common.BizException;
+import com.lifedesk.dailygoal.entity.DailyGoal;
+import com.lifedesk.dailygoal.service.DailyGoalService;
+import com.lifedesk.english.entity.EnglishPunch;
 import com.lifedesk.english.entity.EnglishTask;
+import com.lifedesk.english.mapper.EnglishPunchMapper;
 import com.lifedesk.english.mapper.EnglishTaskMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,7 +15,9 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,7 +25,9 @@ import java.util.Map;
  * 英语提升 Service。
  *
  * <p>每条任务代表一项英语能力提升计划，按 category 分类。
- * 用户可每日打卡（completeToday），累计完成次数 +1、连续天数 +1（断签则清零）。</p>
+ * 用户可每日打卡（completeToday），累计完成次数 +1、连续天数 +1（断签则清零），
+ * 同时写入 english_punch 每日打卡历史供看板按日统计。
+ * 修改每日目标（dailyGoal）会通过 DailyGoalService 生成里程碑，作为阶段分割点。</p>
  *
  * @author LifeDesk
  */
@@ -28,6 +37,8 @@ import java.util.Map;
 public class EnglishTaskService {
 
     private final EnglishTaskMapper englishTaskMapper;
+    private final EnglishPunchMapper englishPunchMapper;
+    private final DailyGoalService dailyGoalService;
 
     /**
      * 列表查询。
@@ -59,7 +70,21 @@ public class EnglishTaskService {
         if (task.getTotalCompleted() == null) task.setTotalCompleted(0);
         if (task.getStreakDays() == null) task.setStreakDays(0);
         englishTaskMapper.insert(task);
+        // 初始每日目标作为「阶段 1」里程碑
+        if (task.getDailyGoal() != null && !task.getDailyGoal().trim().isEmpty()) {
+            saveGoalMilestone(task);
+        }
         return task;
+    }
+
+    /** 写入/更新该任务的每日目标里程碑（module=english, scope=任务ID） */
+    private void saveGoalMilestone(EnglishTask task) {
+        DailyGoal g = new DailyGoal();
+        g.setModule("english");
+        g.setScope(String.valueOf(task.getId()));
+        g.setLabel(task.getName());
+        g.setGoalValue(task.getDailyGoal());
+        dailyGoalService.save(g);
     }
 
     public EnglishTask update(Long id, EnglishTask incoming) {
@@ -67,6 +92,7 @@ public class EnglishTaskService {
         if (existed == null) {
             throw new BizException("任务不存在或已被删除");
         }
+        boolean goalChanged = false;
         if (incoming.getName() != null && !incoming.getName().trim().isEmpty()) {
             existed.setName(incoming.getName());
         }
@@ -74,12 +100,17 @@ public class EnglishTaskService {
             existed.setCategory(incoming.getCategory().trim());
         }
         if (incoming.getDailyGoal() != null) {
+            goalChanged = !incoming.getDailyGoal().equals(existed.getDailyGoal());
             existed.setDailyGoal(incoming.getDailyGoal());
         }
         if (incoming.getTargetDays() != null && incoming.getTargetDays() > 0) {
             existed.setTargetDays(incoming.getTargetDays());
         }
         englishTaskMapper.updateById(existed);
+        // 每日目标变更 → 新里程碑（进入下一阶段）
+        if (goalChanged && existed.getDailyGoal() != null && !existed.getDailyGoal().trim().isEmpty()) {
+            saveGoalMilestone(existed);
+        }
         return existed;
     }
 
@@ -133,8 +164,67 @@ public class EnglishTaskService {
         existed.setLastDoneDate(today);
 
         englishTaskMapper.updateById(existed);
+
+        // 写入每日打卡历史（幂等：同任务同日唯一键）
+        EnglishPunch punch = new EnglishPunch();
+        punch.setTaskId(existed.getId());
+        punch.setDoneDate(today);
+        try {
+            englishPunchMapper.insert(punch);
+        } catch (Exception e) {
+            log.info("[English] 任务 {} 打卡历史已存在（幂等跳过）", existed.getId());
+        }
+
         log.info("[English] 任务 {} 今日打卡，累计 {} 次，连续 {} 天", existed.getName(), total, newStreak);
         return existed;
+    }
+
+    /**
+     * 看板：近 N 天每日打卡统计 + 目标里程碑。
+     * <ul>
+     *   <li>days：[{date, total 当日任务总数(按当前任务数), done 当日打卡数, rate 完成率%}]</li>
+     *   <li>milestones：[{date, scope, label, goalValue}] 每日目标变更历史（阶段分割点）</li>
+     *   <li>stageCount：阶段数（目标变更日期去重数）</li>
+     * </ul>
+     */
+    public Map<String, Object> board(int days) {
+        int n = Math.max(7, Math.min(days, 90));
+        LocalDate today = LocalDate.now();
+        LocalDate start = today.minusDays(n - 1L);
+
+        long totalTasks = englishTaskMapper.selectCount(null);
+
+        List<EnglishPunch> punches = englishPunchMapper.selectList(
+                new LambdaQueryWrapper<EnglishPunch>()
+                        .ge(EnglishPunch::getDoneDate, start)
+                        .le(EnglishPunch::getDoneDate, today));
+        Map<LocalDate, Long> doneByDate = new HashMap<>();
+        for (EnglishPunch p : punches) {
+            doneByDate.merge(p.getDoneDate(), 1L, Long::sum);
+        }
+
+        List<Map<String, Object>> dayRows = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            LocalDate d = start.plusDays(i);
+            long done = doneByDate.getOrDefault(d, 0L);
+            double rate = totalTasks > 0 ? Math.round(done * 1000.0 / totalTasks) / 10.0 : 0;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", d.toString().substring(5)); // MM-dd
+            row.put("total", totalTasks);
+            row.put("done", done);
+            row.put("rate", rate);
+            dayRows.add(row);
+        }
+
+        Map<String, Object> goalData = dailyGoalService.list("english");
+        @SuppressWarnings("unchecked")
+        List<DailyGoal> milestones = (List<DailyGoal>) goalData.get("milestones");
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("days", dayRows);
+        data.put("milestones", milestones);
+        data.put("stageCount", goalData.get("stageCount"));
+        return data;
     }
 
     /**

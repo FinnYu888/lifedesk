@@ -40,3 +40,18 @@ export const completeEnglishTask = (id: number) =>
 
 /** 统计：{ total_tasks, today_done, week_completed, avg_completion_rate, by_category } */
 export const fetchEnglishStat = () => http.get<any, Result>("/english/stat");
+
+/** 看板：近 N 天每日打卡统计 + 每日目标里程碑（阶段分割点） */
+export const fetchEnglishBoard = (days = 30) =>
+  http.get<any, Result>("/english/board", { params: { days } });
+
+/** 每日目标里程碑记录 */
+export interface GoalMilestone {
+  id?: number;
+  module?: string;
+  scope?: string;
+  label?: string;
+  goalValue?: string;
+  unit?: string;
+  startDate?: string;
+}

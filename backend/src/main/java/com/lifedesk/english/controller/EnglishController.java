@@ -64,4 +64,10 @@ public class EnglishController {
     public R<Map<String, Object>> stat() {
         return R.ok(englishTaskService.getStat());
     }
+
+    /** 看板：近 N 天每日打卡统计 + 每日目标里程碑（默认 30 天，7~90） */
+    @GetMapping("/board")
+    public R<Map<String, Object>> board(@RequestParam(defaultValue = "30") int days) {
+        return R.ok(englishTaskService.board(days));
+    }
 }

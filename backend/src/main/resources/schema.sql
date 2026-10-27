@@ -379,6 +379,33 @@ CREATE TABLE IF NOT EXISTS custom_menu (
     INDEX idx_sort_deleted(sort_no, deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='自定义菜单';
 
+-- ========== 每日目标（健康/英语通用；同一 module+scope 的多条记录即里程碑历史） ==========
+-- 修改每日目标 = 生成一条新记录（start_date=当天）作为里程碑分割点，进入下一阶段
+CREATE TABLE IF NOT EXISTS daily_goal (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    module VARCHAR(32) NOT NULL COMMENT '模块：health/english',
+    scope VARCHAR(64) NOT NULL COMMENT 'health:指标key(steps/intake/burn/sleep/water)；english:任务ID',
+    label VARCHAR(128) DEFAULT NULL COMMENT '展示名（健康指标名 / 英语任务名）',
+    goal_value VARCHAR(128) NOT NULL COMMENT '目标值：数字（健康）或描述文本（英语）',
+    unit VARCHAR(16) DEFAULT NULL COMMENT '单位（kcal/h/L/步 等，可选）',
+    start_date DATE NOT NULL COMMENT '生效日期，即里程碑分割点',
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_module_scope(module, scope, start_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日目标及里程碑历史';
+
+-- ========== 英语每日打卡记录（看板按日统计用） ==========
+CREATE TABLE IF NOT EXISTS english_punch (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    task_id BIGINT NOT NULL COMMENT '任务 ID',
+    done_date DATE NOT NULL COMMENT '打卡日期',
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_task_date(task_id, done_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='英语任务每日打卡记录';
+
 -- ========== 增量字段迁移说明 ==========
 -- CREATE TABLE IF NOT EXISTS 不会更新已存在的表，新增字段由 DatabaseMigration Runner
 -- 在启动后用 JDBC 检查 INFORMATION_SCHEMA 并 ALTER TABLE ADD COLUMN（精确无副作用）。
