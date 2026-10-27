@@ -8,16 +8,22 @@
       <div class="text-positive">{{ greeting?.date }}</div>
     </div>
 
-    <div class="module-grid">
-      <div
-        v-for="m in modules"
-        :key="m.path"
-        class="module-card ld-card"
-        @click="goTo(m.path)"
-      >
-        <div class="m-label">{{ m.label }}</div>
-        <div class="m-value">{{ m.value }}</div>
-        <div class="m-note" :class="m.noteCls">{{ m.note }}</div>
+    <div class="ld-card workspace-overview">
+      <div class="wo-head">
+        <span class="wo-title">工作台总览</span>
+        <span class="wo-hint">点击任意模块直达对应页面</span>
+      </div>
+      <div class="wo-grid">
+        <div
+          v-for="m in modules"
+          :key="m.path"
+          class="wo-item"
+          @click="goTo(m.path)"
+        >
+          <div class="wo-value">{{ m.value }}</div>
+          <div class="wo-label">{{ m.label }}</div>
+          <div v-if="m.note" class="wo-note" :class="m.noteCls">{{ m.note }}</div>
+        </div>
       </div>
     </div>
 
@@ -481,28 +487,84 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.module-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
+/* ===== 工作台总览合并卡：8 个模块 4×2 网格，点击直达 ===== */
+.workspace-overview {
   margin-bottom: 22px;
+  padding: 16px 20px 14px;
 }
-.module-card {
-  cursor: pointer;
+.wo-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
-.m-label {
-  font-size: 13px;
-  color: $text-tertiary;
-  margin-bottom: 8px;
-}
-.m-value {
-  font-size: 28px;
+.wo-title {
+  font-size: 15px;
   font-weight: 700;
   color: $text-primary;
-  margin-bottom: 4px;
 }
-.m-note {
+.wo-hint {
+  font-size: 11px;
+  color: $text-tertiary;
+}
+.wo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.wo-item {
+  position: relative;
+  padding: 8px 12px 6px;
+  border-radius: $radius-sm;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+  /* 模块间竖分隔线（每行首列除外） */
+  &:not(:nth-child(4n + 1))::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 16%;
+    height: 68%;
+    width: 1px;
+    background: $border-subtle;
+  }
+  &:hover {
+    background: rgba(167, 139, 250, 0.07);
+    .wo-value {
+      color: $accent;
+    }
+  }
+}
+.wo-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: $text-primary;
+  line-height: 1.2;
+  transition: color 0.15s;
+}
+.wo-label {
+  margin-top: 3px;
   font-size: 12px;
+  color: $text-secondary;
+}
+.wo-note {
+  margin-top: 2px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 窄屏：2 列 × 4 行 */
+@media (max-width: 900px) {
+  .wo-grid {
+    grid-template-columns: repeat(2, 1fr);
+    row-gap: 6px;
+  }
+  .wo-item {
+    /* 2 列布局下每行首列（奇数项）去掉分隔线 */
+    &:nth-child(2n + 1)::before {
+      display: none;
+    }
+  }
 }
 
 .section-head {
