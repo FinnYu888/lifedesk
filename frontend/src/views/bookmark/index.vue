@@ -1055,13 +1055,13 @@ onBeforeUnmount(() => {
 .card-stack {
   position: relative;
   width: 100%;
-  max-width: 494px;    /* 380 → 494（+30%） */
-  height: 455px;       /* 350 → 455 */
+  max-width: 494px;    /* 380 → 494（+30%），宽度不变 */
+  height: 364px;       /* 455 → 364，高度调低 20% */
   perspective: 1600px;  /* 卡片加大，透视距离同步加大避免畸变 */
   perspective-origin: 50% 55%;
   transform-style: preserve-3d;
-  /* --btn-top：按钮垂直位置，收藏默认在 info 区（卡片下半截，约 65% 处） */
-  --btn-top: 295px;    /* 215 → 295，配合卡片高度 403 的下半截 */
+  /* --btn-top：按钮垂直位置，收藏默认在 info 区（卡片下半截，约 73% 处） */
+  --btn-top: 236px;    /* 295 → 236，配合卡片高度 322 的下半截 */
 }
 .note-stack {
   height: 364px;       /* 280 → 364 */
@@ -1105,14 +1105,14 @@ onBeforeUnmount(() => {
 
 /* ========== 收藏卡片（加大 30%） ========== */
 .link-card {
-  height: 403px;       /* 310 → 403 */
+  height: 322px;       /* 403 → 322，高度调低 20% */
   display: flex;
   flex-direction: column;
 }
 .screenshot {
   position: relative;
   width: 100%;
-  height: 221px;      /* 170 → 221 */
+  height: 177px;      /* 221 → 177，随卡片高度同步降 20% */
   background: rgba(0, 0, 0, 0.25);
   overflow: hidden;
   border-bottom: 1px solid $border-subtle;
