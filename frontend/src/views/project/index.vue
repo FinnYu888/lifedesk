@@ -1,11 +1,23 @@
 <template>
   <div class="project">
-    <!-- 统计卡行 -->
-    <div class="stat-row">
-      <StatCard label="活跃项目" :value="stat.active_projects ?? 0" note="未删除项目" noteType="positive" />
-      <StatCard label="本周提交" :value="stat.week_commits ?? 0" :note="stat.week_commits_trend || '+0'" noteType="positive" />
-      <StatCard label="合并请求" :value="stat.pending_prs ?? 0" note="累计已合并 PR" noteType="positive" />
-      <StatCard label="本周新仓库" :value="stat.new_repos ?? 0" note="近 7 天新增" noteType="neutral" />
+    <!-- 项目总览：合并统计卡（主指标 + 次级指标） -->
+    <div class="ld-card overview-card">
+      <div class="ov-head">
+        <span class="ov-title">项目总览</span>
+        <span class="ov-updated">数据更新于 {{ overviewUpdatedText }}</span>
+      </div>
+      <div class="ov-main">
+        <div v-for="m in ovMainMetrics" :key="m.label" class="ov-metric" :class="m.tone">
+          <div class="ov-value">{{ m.value }}</div>
+          <div class="ov-label">{{ m.label }}</div>
+        </div>
+      </div>
+      <div class="ov-sub">
+        <span class="ov-chip" v-for="c in ovSubChips" :key="c.label" :title="c.title">
+          <span class="chip-label">{{ c.label }}</span>
+          <span class="chip-value">{{ c.value }}</span>
+        </span>
+      </div>
     </div>
 
     <!-- 用例通过率（RPT 测试用例平台，盐田/蛇口双租户） -->
@@ -570,7 +582,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
-import StatCard from "@/components/StatCard.vue";
+import RingChart from "@/components/RingChart.vue";
 import ProgressBar from "@/components/ProgressBar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus, Edit, Refresh, Delete } from "@element-plus/icons-vue";
@@ -603,6 +615,66 @@ const active = ref<any[]>([]);
 const milestones = ref<RequirementMilestone[]>([]);
 const commits = ref<any[]>([]);
 const requirements = ref<Requirement[]>([]);
+
+// ===== 项目总览（合并统计卡）：主指标 + 次级指标 =====
+const ovMainMetrics = computed(() => [
+  {
+    label: "活跃项目",
+    value: stat.value.active_projects ?? 0,
+    tone: "violet"
+  },
+  {
+    label: "累计提交",
+    value: (stat.value.week_commits ?? 0).toLocaleString(),
+    tone: "teal"
+  },
+  {
+    label: "已合并 PR",
+    value: stat.value.pending_prs ?? 0,
+    tone: "amber"
+  },
+  {
+    label: "Releases",
+    value: active.value.reduce((s, p) => s + (p.releasesCount ?? 0), 0),
+    tone: "rose"
+  }
+]);
+
+const ovSubChips = computed(() => {
+  // 技术栈分布（取前 4 个，其余合并为"其他"）
+  const techMap = new Map<string, number>();
+  active.value.forEach(p => {
+    const t = (p.tech || "").trim();
+    if (t) techMap.set(t, (techMap.get(t) || 0) + 1);
+  });
+  const top = [...techMap.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const techText = top.map(([t, n]) => `${t}×${n}`).join(" / ");
+
+  // 最近同步时间（全部项目里最新的 lastSyncAt）
+  const latestSync = active.value
+    .map(p => p.lastSyncAt)
+    .filter(Boolean)
+    .sort()
+    .pop();
+
+  const chips: { label: string; value: string; title?: string }[] = [
+    { label: "本周新增仓库", value: String(stat.value.new_repos ?? 0), title: "近 7 天新建项目数" },
+    { label: "里程碑", value: `${milestones.value.length} 个`, title: "从需求接口聚合的 sprint 里程碑" },
+    { label: "我的需求", value: `${requirements.value.length} 条`, title: "第三方需求平台拉取的开发任务" },
+    { label: "最近同步", value: latestSync ? pushTimeAgo(latestSync) : "—", title: "全部项目中最近一次 git 同步" }
+  ];
+  if (techText) chips.push({ label: "技术栈", value: techText, title: "活跃项目技术栈分布（前 4）" });
+  return chips;
+});
+
+const overviewUpdatedText = computed(() => {
+  const latest = active.value
+    .map(p => p.lastSyncAt)
+    .filter(Boolean)
+    .sort()
+    .pop();
+  return latest ? pushTimeAgo(latest) : "刚刚";
+});
 
 const reqSprint = ref<string>("");
 const reqStatus = ref<string>("");
@@ -1527,12 +1599,100 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
-.stat-row {
-  display: grid;
-  /* 自适应屏幕：空间足够时 4 列，变窄自动换行为 3/2/1 列 */
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px;
+/* ===== 项目总览合并卡：主指标 4 列 + 次级指标条 ===== */
+.overview-card {
   margin-bottom: 14px;
+  padding: 16px 20px 14px;
+}
+.ov-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.ov-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: $text-primary;
+}
+.ov-updated {
+  font-size: 11px;
+  color: $text-tertiary;
+}
+.ov-main {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin-bottom: 12px;
+}
+.ov-metric {
+  position: relative;
+  text-align: center;
+  padding: 6px 0;
+  /* 指标间竖分隔线（首列除外） */
+  & + &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12%;
+    height: 76%;
+    width: 1px;
+    background: $border-subtle;
+  }
+}
+.ov-value {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.5px;
+}
+.ov-label {
+  margin-top: 2px;
+  font-size: 12px;
+  color: $text-secondary;
+}
+/* 各指标主题色（数字着色，弱化底色干扰） */
+.ov-metric.violet .ov-value { color: #a78bfa; }
+.ov-metric.teal   .ov-value { color: #2dd4bf; }
+.ov-metric.amber  .ov-value { color: #fbbf24; }
+.ov-metric.rose   .ov-value { color: #f472b6; }
+
+.ov-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed $border-subtle;
+}
+.ov-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid $border-subtle;
+  font-size: 12px;
+  .chip-label {
+    color: $text-tertiary;
+  }
+  .chip-value {
+    color: $text-primary;
+    font-weight: 600;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+/* 窄屏：主指标 2 列换行，次级条自然换行 */
+@media (max-width: 900px) {
+  .ov-main {
+    grid-template-columns: repeat(2, 1fr);
+    row-gap: 10px;
+  }
+  .ov-metric:nth-child(3)::before {
+    display: none; /* 第 3 个换行到第二行首列，隐藏分隔线 */
+  }
 }
 
 /* ===== 区域自由排版看板：多列均分，列内紧凑堆叠（14px 间距），不会出现大空隙 ===== */
