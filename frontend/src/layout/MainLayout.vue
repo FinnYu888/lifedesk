@@ -8,27 +8,40 @@
       </div>
 
       <nav class="nav-group">
+        <!-- 工作台内置菜单：点击开 tab（不重复开），可拖拽排序，顺序持久化 localStorage -->
         <div class="nav-title">工作台</div>
-        <router-link
-          v-for="item in navItems"
+        <div
+          v-for="item in orderedNavItems"
           :key="item.path"
-          :to="item.path"
-          class="nav-item"
-          active-class="nav-item-active"
+          class="nav-item nav-draggable"
+          :class="{
+            'nav-item-active': route.path === item.path,
+            dragging: dragKey === navKey(item.path)
+          }"
+          draggable="true"
+          @click="onBuiltinMenuClick(item)"
+          @dragstart="onNavDragStart(navKey(item.path), $event)"
+          @dragover.prevent
+          @drop.prevent="onNavDrop(navKey(item.path), $event)"
         >
           <el-icon><component :is="item.icon" /></el-icon>
           <span>{{ item.label }}</span>
-        </router-link>
+        </div>
 
         <!-- 自定义菜单：用户自行添加的外部网站（iframe 嵌入当前系统）
-             点击打开为 tab，多个 tab 不互相覆盖；已打开的菜单再点 → 自动定位到该 tab -->
+             点击打开为 tab，多个 tab 不互相覆盖；已打开的菜单再点 → 自动定位到该 tab。
+             同样支持拖拽排序（顺序持久化 localStorage） -->
         <div class="nav-title">自定义</div>
         <div
-          v-for="m in customMenus"
+          v-for="m in orderedCustomMenus"
           :key="m.id"
-          class="nav-item custom-nav-item"
-          :class="{ 'nav-item-active': isTabActiveFor(m) }"
+          class="nav-item custom-nav-item nav-draggable"
+          :class="{ 'nav-item-active': isTabActiveFor(m), dragging: dragKey === 'c:' + m.id }"
+          draggable="true"
           @click="onCustomMenuClick(m)"
+          @dragstart="onNavDragStart('c:' + m.id, $event)"
+          @dragover.prevent
+          @drop.prevent="onNavDrop('c:' + m.id, $event)"
         >
           <el-icon><component :is="iconOf(m.icon)" /></el-icon>
           <span class="custom-nav-label">{{ m.name }}</span>
@@ -88,19 +101,25 @@
         </el-badge>
       </header>
 
-      <!-- 自定义菜单 Tab 栏：仅当有打开的 tab 时显示。
-           每个自定义菜单点击后开一个 tab，互不覆盖；点 tab 切换激活；点 x 关闭 -->
+      <!-- 菜单 Tab 栏：内置菜单 + 自定义菜单统一切换。
+           点 tab 切换激活；拖拽 tab 可调整顺序；点 x 关闭 -->
       <div v-if="tabs.length > 0" class="menu-tab-bar">
         <div class="menu-tabs">
           <div
             v-for="t in tabs"
             :key="t.id"
             class="menu-tab"
-            :class="{ active: t.id === activeTabId && tabMode }"
-            :title="t.name + ' · ' + t.url"
+            :class="{ active: t.id === activeTabId }"
+            :title="t.type === 'builtin' ? t.name : t.name + ' · ' + t.url"
+            draggable="true"
             @click="activateTab(t.id)"
+            @dragstart="onTabDragStart(t.id, $event)"
+            @dragover.prevent
+            @drop.prevent="onTabDrop(t.id, $event)"
           >
-            <el-icon class="tab-icon"><component :is="iconOf(t.icon)" /></el-icon>
+            <el-icon class="tab-icon">
+              <component :is="t.type === 'builtin' ? t.icon : iconOf(t.icon)" />
+            </el-icon>
             <span class="tab-label">{{ t.name }}</span>
             <el-icon class="tab-close" @click.stop="closeTab(t.id)"><Close /></el-icon>
           </div>
@@ -165,10 +184,14 @@
             </div>
           </div>
         </div>
-        <!-- 普通 router-view：非 tab 模式或无 tab 时显示。
-             外包一层 wrapper 以便在 tab 视图模式下取消 padding（让 iframe 全屏铺满） -->
+        <!-- 普通 router-view：激活 tab 为内置菜单或无 tab 时显示。
+             keep-alive 保活：切到 iframe tab 再切回来，页面状态（筛选、滚动）不丢失 -->
         <div v-show="!tabMode || tabs.length === 0" class="router-view-wrap">
-          <router-view />
+          <router-view v-slot="{ Component }">
+            <keep-alive>
+              <component :is="Component" />
+            </keep-alive>
+          </router-view>
         </div>
       </main>
     </div>
@@ -261,17 +284,93 @@ const navItems = [
   { path: "/health", label: "个人健康", icon: Sunny }
 ];
 
+// ===== 侧栏菜单拖拽排序（内置 + 自定义统一持久化到 localStorage） =====
+const ORDER_KEY = "lifedesk-sidebar-order";
+
+function loadSidebarOrder(): string[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(ORDER_KEY) || "[]");
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+const sidebarOrder = ref<string[]>(loadSidebarOrder());
+
+function saveSidebarOrder() {
+  localStorage.setItem(ORDER_KEY, JSON.stringify(sidebarOrder.value));
+}
+
+function navKey(path: string) {
+  return "b:" + path;
+}
+
+function orderIndexOf(key: string): number {
+  const i = sidebarOrder.value.indexOf(key);
+  return i < 0 ? Number.MAX_SAFE_INTEGER : i; // 未记录顺序的排最后，保持原相对顺序
+}
+
+const orderedNavItems = computed(() =>
+  [...navItems].sort((a, b) => orderIndexOf(navKey(a.path)) - orderIndexOf(navKey(b.path)))
+);
+
+const orderedCustomMenus = computed(() =>
+  [...customMenus.value].sort((a, b) => orderIndexOf("c:" + a.id) - orderIndexOf("c:" + b.id))
+);
+
+let dragKey = "";
+
+function onNavDragStart(key: string, e: DragEvent) {
+  dragKey = key;
+  e.dataTransfer?.setData("text/plain", key);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
+
+function onNavDrop(targetKey: string, e: DragEvent) {
+  const from = dragKey || e.dataTransfer?.getData("text/plain") || "";
+  dragKey = "";
+  if (!from || from === targetKey) return;
+  if (from[0] !== targetKey[0]) return; // 跨分组（工作台 ⇄ 自定义）不允许排序
+  const rest = sidebarOrder.value.filter((k) => k !== from);
+  const ti = rest.indexOf(targetKey);
+  rest.splice(ti < 0 ? rest.length : ti, 0, from);
+  sidebarOrder.value = rest;
+  saveSidebarOrder();
+}
+
+// ===== Tab 栏拖拽排序（仅调整显示顺序，不影响各 tab 内容） =====
+let dragTabId: number | null = null;
+
+function onTabDragStart(id: number, e: DragEvent) {
+  dragTabId = id;
+  e.dataTransfer?.setData("text/plain", "tab:" + id);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
+
+function onTabDrop(targetId: number, e: DragEvent) {
+  const from = dragTabId;
+  dragTabId = null;
+  if (from == null || from === targetId) return;
+  const fi = tabs.value.findIndex((t) => t.id === from);
+  const ti = tabs.value.findIndex((t) => t.id === targetId);
+  if (fi < 0 || ti < 0) return;
+  const [moved] = tabs.value.splice(fi, 1);
+  tabs.value.splice(ti, 0, moved);
+}
+
 // ===== 自定义菜单 =====
 const { customMenus, loadCustomMenus, addCustomMenu, removeCustomMenu, editCustomMenu } =
   useCustomMenus();
 
-// ===== 自定义菜单 Tab 状态（模块级单例，跨组件共享） =====
+// ===== 菜单 Tab 状态（模块级单例，跨组件共享；内置菜单 + 自定义菜单统一管理） =====
 const {
   tabs,
   activeTabId,
   activeTab,
   tabMode,
   openTab,
+  openBuiltinTab,
   closeTab,
   activateTab,
   removeTab
@@ -297,6 +396,21 @@ function onCustomMenuClick(m: CustomMenu) {
     iframeLoaded.value[m.id!] = false;
   }
 }
+
+// 点击工作台内置菜单：以 tab 形式打开/激活（不重复开），并路由到对应页面
+function onBuiltinMenuClick(item: { path: string; label: string; icon: any }) {
+  openBuiltinTab(item.label, item.path, item.icon);
+  if (route.path !== item.path) {
+    router.push(item.path);
+  }
+}
+
+// 激活的 tab 变为内置菜单时（如关闭当前 tab 后自动切到相邻内置 tab）→ 路由跟随跳转
+watch(activeTab, (t) => {
+  if (t && t.type === "builtin" && t.path && route.path !== t.path) {
+    router.push(t.path);
+  }
+});
 
 // 点击普通导航项时，路由变化 → 自动退出 tab 视图，显示 router-view
 // （tab 不关闭，下次点自定义菜单或 tab 标签时可再切回）
@@ -507,6 +621,21 @@ onMounted(() => {
   background: rgba(167, 139, 250, 0.16);
   color: $accent-light;
   border: 1px solid $border-accent;
+}
+
+// 可拖拽排序的菜单项
+.nav-draggable {
+  cursor: grab;
+  &:active {
+    cursor: grabbing;
+  }
+}
+.nav-item.dragging {
+  opacity: 0.4;
+}
+// 拖拽悬停时的目标位置提示
+.nav-item:not(.dragging):hover {
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.12);
 }
 
 // 自定义菜单项：名称可截断，hover 时显示删除图标
