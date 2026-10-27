@@ -1,6 +1,6 @@
 <template>
   <div class="ring-chart" :style="{ width: size + 'px', height: size + 'px' }">
-    <svg :width="size" :height="size" viewBox="0" class="ring">
+    <svg :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`" class="ring">
       <circle :cx="r" :cy="r" :r="radius" fill="none" :stroke="trackColor" :stroke-width="stroke" />
       <circle
         :cx="r"

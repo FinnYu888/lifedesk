@@ -37,21 +37,45 @@ function loadInitial(): ThemeName {
 
 const theme = ref<ThemeName>(loadInitial());
 
+/** 把主题同步到 <html data-theme="...">（CSS 侧按属性覆盖变量，glass 为 :root 默认） */
+function applyThemeToDom(t: ThemeName): void {
+  if (t === "glass") {
+    delete document.documentElement.dataset.theme;
+  } else {
+    document.documentElement.dataset.theme = t;
+  }
+}
+
+/**
+ * 切换瞬间给 <html> 加 theme-switching 类（配合 index.scss 全局禁用过渡/毛玻璃），
+ * 强制合成层一次性扁平重建，避免大量 backdrop-filter 层在硬件加速下同时失效，
+ * 出现「切主题后页面数据不显示、刷新才恢复」的渲染问题；随后派发 resize
+ * 让 ECharts 等图表组件立即重绘画布。
+ */
+function forceLayerRebuild(t: ThemeName): void {
+  const root = document.documentElement;
+  root.classList.add("theme-switching");
+  applyThemeToDom(t);
+  try {
+    localStorage.setItem(THEME_KEY, t);
+  } catch {
+    /* ignore */
+  }
+  // 强制同步 reflow：新主题样式立即生效，不走逐属性过渡
+  void document.body.offsetHeight;
+  window.setTimeout(() => {
+    root.classList.remove("theme-switching");
+    // 通知所有监听窗口尺寸的组件（vue-echarts autoresize 等）重绘
+    window.dispatchEvent(new Event("resize"));
+  }, 120);
+}
+
 // 同步到 <html data-theme="...">：CSS 侧 [data-theme="tech"]/[data-theme="cream"] 覆盖变量，
 // glass 是 :root 默认值，data-theme 留空即可
 watch(
   theme,
   (t) => {
-    if (t === "glass") {
-      delete document.documentElement.dataset.theme;
-    } else {
-      document.documentElement.dataset.theme = t;
-    }
-    try {
-      localStorage.setItem(THEME_KEY, t);
-    } catch {
-      /* ignore */
-    }
+    forceLayerRebuild(t);
   },
   { immediate: true }
 );
