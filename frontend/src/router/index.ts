@@ -22,7 +22,7 @@ const routes: RouteRecordRaw[] = [
         path: "task",
         name: "Task",
         component: () => import("@/views/task/index.vue"),
-        meta: { title: "任务工单" }
+        meta: { title: "每日速览" }
       },
       {
         path: "schedule",

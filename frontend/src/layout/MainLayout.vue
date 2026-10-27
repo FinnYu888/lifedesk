@@ -278,7 +278,7 @@ const pageTitle = computed(() => {
 const navItems = [
   { path: "/dashboard", label: "首页", icon: HomeFilled },
   { path: "/project", label: "项目管理", icon: Folder },
-  { path: "/task", label: "任务工单", icon: List },
+  { path: "/task", label: "每日速览", icon: List },
   { path: "/schedule", label: "日程会议", icon: Calendar },
   { path: "/monitor", label: "系统监控", icon: Monitor },
   { path: "/skill", label: "Skills 工坊", icon: Trophy },
