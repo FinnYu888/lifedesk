@@ -1,6 +1,8 @@
 package com.lifedesk.favorite.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.lifedesk.common.BaseEntity;
@@ -32,15 +34,19 @@ public class Favorite extends BaseEntity {
     /** link=收藏 / note=笔记 */
     private String type;
 
-    /** 备注/分类，可选 */
+    /** 备注/分类，可选；置 null 表示清空（IGNORED 策略保证 updateById 能写入 null） */
+    @TableField(updateStrategy = FieldStrategy.IGNORED)
     private String description;
 
     /** 环境标识：test=测试 / integration=集成 / prod=生产（仅 type=link 有意义） */
+    @TableField(updateStrategy = FieldStrategy.IGNORED)
     private String env;
 
     /** CDS 版本：3.0 / 5.0（仅 type=link 有意义；前端红绿区分避免选错） */
+    @TableField(updateStrategy = FieldStrategy.IGNORED)
     private String cdsVersion;
 
-    /** 网页截图 URL，可选；为空时前端兜底用公开截图服务 mShots 自动生成 */
+    /** 网页截图 URL / 本地图片路径，可选；为空时前端兜底用公开截图服务 mShots 自动生成 */
+    @TableField(updateStrategy = FieldStrategy.IGNORED)
     private String screenshot;
 }

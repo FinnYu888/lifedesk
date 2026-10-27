@@ -74,6 +74,27 @@ public class FavoriteService {
         }
         // description 留空表示"清空备注"，所以接收 null 也写入
         existed.setDescription(incoming.getDescription());
+        // 环境标识：接收 null/空串表示"清空环境"，与 description 同语义直接写入
+        String env = incoming.getEnv();
+        if (env == null || env.trim().isEmpty()) {
+            existed.setEnv(null);
+        } else {
+            existed.setEnv(env.trim());
+        }
+        // CDS 版本：同上，可清空
+        String cds = incoming.getCdsVersion();
+        if (cds == null || cds.trim().isEmpty()) {
+            existed.setCdsVersion(null);
+        } else {
+            existed.setCdsVersion(cds.trim());
+        }
+        // 截图 URL / 本地图片路径：留空表示"清空，用 mShots 自动截图兜底"
+        String shot = incoming.getScreenshot();
+        if (shot == null || shot.trim().isEmpty()) {
+            existed.setScreenshot(null);
+        } else {
+            existed.setScreenshot(shot.trim());
+        }
         favoriteMapper.updateById(existed);
         return existed;
     }
