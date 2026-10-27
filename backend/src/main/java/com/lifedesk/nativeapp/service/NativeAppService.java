@@ -136,6 +136,14 @@ public class NativeAppService {
         } else if (file.getParentFile() != null && file.getParentFile().isDirectory()) {
             pb.directory(file.getParentFile());
         }
+        // 关键修复：剥离 Electron 宿主环境变量。WorkBuddy 等桌面宿主为 Electron 应用，
+        // 其派生进程环境带 ELECTRON_RUN_AS_NODE=1，会让 Electron 系应用
+        // （Postman/VSCode/Cursor 等）以无界面 Node.js 模式启动——进程存在但永远无窗口
+        Map<String, String> env = pb.environment();
+        env.remove("ELECTRON_RUN_AS_NODE");
+        env.remove("ELECTRON_NO_ATTACH_CONSOLE");
+        env.remove("ELECTRON_ENABLE_LOGGING");
+        env.remove("ELECTRON_ENABLE_STACK_DUMPING");
 
         try {
             pb.start();
