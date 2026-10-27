@@ -68,6 +68,7 @@
               <!-- 网页截图 -->
               <div class="screenshot">
                 <img
+                  :key="imgKey(item)"
                   :src="screenshotOf(item)"
                   loading="lazy"
                   @error="onImgError($event, item)"
@@ -100,6 +101,12 @@
               </div>
               <!-- 卡片操作 -->
               <div class="card-actions" @click.stop @pointerdown.stop>
+                <el-icon
+                  v-if="!item.screenshot"
+                  class="op"
+                  title="重新截图（403/404 占位图时点击刷新）"
+                  @click="refreshScreenshot(item)"
+                ><RefreshRight /></el-icon>
                 <el-icon class="op" @click="openEdit(item)"><Edit /></el-icon>
                 <el-icon class="op danger" @click="onDelete(item)"><Delete /></el-icon>
               </div>
@@ -127,7 +134,7 @@
                     <el-icon><Close /></el-icon>
                   </button>
                   <div class="detail-shot">
-                    <img :src="screenshotOf(links[detailIdx])" @error="onImgError($event, links[detailIdx])" />
+                    <img :key="imgKey(links[detailIdx])" :src="screenshotOf(links[detailIdx])" @error="onImgError($event, links[detailIdx])" />
                   </div>
                   <div class="detail-info">
                     <div class="tags">
@@ -146,6 +153,13 @@
                       </button>
                       <button class="ld-btn ld-btn-ghost" @click="openEdit(links[detailIdx])">
                         <el-icon><Edit /></el-icon> 编辑
+                      </button>
+                      <button
+                        v-if="!links[detailIdx].screenshot"
+                        class="ld-btn ld-btn-ghost"
+                        @click="refreshScreenshot(links[detailIdx])"
+                      >
+                        <el-icon><RefreshRight /></el-icon> 重新截图
                       </button>
                     </div>
                   </div>
@@ -340,7 +354,8 @@ import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   Search, Plus, Link, Document, Edit, Delete,
-  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Close, Picture, CopyDocument
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Close, Picture, CopyDocument,
+  RefreshRight
 } from "@element-plus/icons-vue";
 import {
   fetchFavorites,
@@ -365,6 +380,9 @@ const dragDeltaX = ref(0);          // 拖拽+惯性过程中的连续像素位�
 const dragging = ref(false);
 const detailIdx = ref(-1);
 const imgLoaded = ref<Record<number, boolean>>({});
+// 截图重试链状态：nonce=刷新时间戳（穿透 mShots 缓存）；attempt=降级档位（0=mShots 1=thum.io）
+const shotNonce = ref<Record<number, number>>({});
+const shotAttempt = ref<Record<number, number>>({});
 // cover flow 中心卡索引
 const currentLinkIdx = ref(0);
 let autoLinkTimer: any = null;
@@ -477,13 +495,38 @@ function screenshotOf(item: Favorite): string {
     return s;
   }
   if (!item.value) return "";
-  return `https://s.wordpress.com/mshots/v1/${encodeURIComponent(item.value)}?w=480&h=320`;
+  // 截图源按重试次数降级：0=mShots（带时间戳穿透缓存）→ 1=thum.io 真实截图
+  const nonce = shotNonce.value[item.id!] || 0;
+  const attempt = shotAttempt.value[item.id!] || 0;
+  if (attempt === 0) {
+    const ts = nonce ? `&t=${nonce}` : "";
+    return `https://s.wordpress.com/mshots/v1/${encodeURIComponent(item.value)}?w=480&h=320${ts}`;
+  }
+  return `https://image.thum.io/get/width/480/crop/320/noanimate/${item.value}`;
+}
+
+/**
+ * 刷新截图：重置重试链 + 时间戳穿透 mShots 缓存，强制按链接重新截图。
+ * mShots 首次截图可能拿到 403/404 占位图，点击刷新让其重新抓取。
+ */
+function refreshScreenshot(item: Favorite) {
+  if (!item.id) return;
+  shotAttempt.value[item.id] = 0;
+  shotNonce.value[item.id] = Date.now();
+  imgLoaded.value[item.id] = false;
+  ElMessage.info("正在重新截图，稍候几秒即可看到最新效果");
 }
 
 function onImgError(e: Event, item: Favorite) {
-  // 加载失败 → 用 favicon 兜底（本地路径填错时也会走到这里）
+  // 加载失败 → 降级截图源：mShots 失败换 thum.io，最后 favicon 兜底
   const img = e.target as HTMLImageElement;
-  if (!item.value) return;
+  if (!item.value || !item.id) return;
+  const attempt = shotAttempt.value[item.id] || 0;
+  if (attempt < 1) {
+    shotAttempt.value[item.id] = attempt + 1;
+    img.src = screenshotOf(item);
+    return;
+  }
   try {
     const u = new URL(item.value);
     img.src = `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=128`;
@@ -494,6 +537,12 @@ function onImgError(e: Event, item: Favorite) {
 
 function onImgLoad(e: Event, item: Favorite) {
   if (item.id) imgLoaded.value[item.id] = true;
+}
+
+/** img 的 key：nonce/attempt 变化时强制重建元素触发重新加载 */
+function imgKey(item: Favorite): string {
+  if (!item.id) return "0-0";
+  return `${shotNonce.value[item.id] || 0}-${shotAttempt.value[item.id] || 0}`;
 }
 
 // ===== 标签样式映射 =====
