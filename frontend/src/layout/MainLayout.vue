@@ -803,6 +803,36 @@ html[data-theme="tech"] .theme-toggle {
   flex: 1;
   padding: 22px;
   overflow-y: auto;
+  min-width: 0;
+}
+/* 窄屏自适应：缩小内边距，给内容更多空间 */
+@media (max-width: 900px) {
+  .router-view-wrap {
+    padding: 14px;
+  }
+  .sidebar {
+    width: 200px;
+  }
+}
+@media (max-width: 640px) {
+  .router-view-wrap {
+    padding: 10px;
+  }
+  .sidebar {
+    width: 64px;
+  }
+  .brand-name,
+  .nav-item span,
+  .nav-title,
+  .health-mini,
+  .nickname,
+  .custom-nav-label,
+  .custom-nav-del {
+    display: none;
+  }
+  .nav-item {
+    justify-content: center;
+  }
 }
 
 /* ========== 自定义菜单 Tab 栏 ========== */

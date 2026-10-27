@@ -128,9 +128,28 @@
       </div>
     </div>
 
-    <div class="dual-row">
-      <!-- 活跃项目列表 -->
-      <div class="ld-card">
+    <!-- 可拖拽换位的区域看板：长按卡片约 0.3s 进入拖拽，松手落到目标区域即换位；
+         布局为独立双列（宽屏两列 / 窄屏一列，随屏幕宽度自适应），
+         每列内部紧凑堆叠，各区域宽度自适应列宽，不会出现大空隙 -->
+    <div ref="boardEl" class="board">
+      <div v-for="(colRegionsArr, colIdx) in boardColumns" :key="colIdx" class="board-col">
+        <template v-for="rid in colRegionsArr" :key="rid">
+          <!-- 活跃项目列表 -->
+          <div
+            v-if="rid === 'projects'"
+            class="ld-card region"
+            :class="regionCls('projects')"
+            :draggable="armedRegion === 'projects'"
+            title="长按拖动可与其他区域换位"
+            @mousedown="onRegionMouseDown('projects', $event)"
+            @mouseup="onRegionMouseUp"
+            @mouseleave="clearPressTimer"
+            @dragstart="onRegionDragStart('projects', $event)"
+            @dragover="onRegionDragOver('projects', $event)"
+            @dragleave="onRegionDragLeave('projects')"
+            @drop="onRegionDrop('projects', $event)"
+            @dragend="onRegionDragEnd"
+          >
         <div class="card-head">
           <div class="card-title">活跃项目</div>
           <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">新建项目</el-button>
@@ -191,8 +210,22 @@
         </div>
       </div>
 
-      <!-- 我的需求（第三方需求平台拉取） -->
-      <div class="ld-card req-card">
+          <!-- 我的需求（第三方需求平台拉取） -->
+          <div
+            v-else-if="rid === 'reqs'"
+            class="ld-card region req-card"
+            :class="regionCls('reqs')"
+            :draggable="armedRegion === 'reqs'"
+            title="长按拖动可与其他区域换位"
+            @mousedown="onRegionMouseDown('reqs', $event)"
+            @mouseup="onRegionMouseUp"
+            @mouseleave="clearPressTimer"
+            @dragstart="onRegionDragStart('reqs', $event)"
+            @dragover="onRegionDragOver('reqs', $event)"
+            @dragleave="onRegionDragLeave('reqs')"
+            @drop="onRegionDrop('reqs', $event)"
+            @dragend="onRegionDragEnd"
+          >
         <div class="card-head">
           <div class="card-title">我的需求</div>
           <div class="req-filter">
@@ -316,7 +349,21 @@
       </div>
 
       <!-- 里程碑进度（按需求接口 sprint 聚合 + issue/query status=CLOSED 统计） -->
-      <div class="ld-card">
+          <div
+            v-else-if="rid === 'milestones'"
+            class="ld-card region"
+            :class="regionCls('milestones')"
+            :draggable="armedRegion === 'milestones'"
+            title="长按拖动可与其他区域换位"
+            @mousedown="onRegionMouseDown('milestones', $event)"
+            @mouseup="onRegionMouseUp"
+            @mouseleave="clearPressTimer"
+            @dragstart="onRegionDragStart('milestones', $event)"
+            @dragover="onRegionDragOver('milestones', $event)"
+            @dragleave="onRegionDragLeave('milestones')"
+            @drop="onRegionDrop('milestones', $event)"
+            @dragend="onRegionDragEnd"
+          >
         <div class="card-head">
           <div class="card-title">里程碑进度</div>
           <span class="text-tertiary" style="font-size: 12px">按 Sprint 聚合</span>
@@ -339,7 +386,21 @@
       </div>
 
       <!-- 最近提交活动（每个项目最后一次提交） -->
-      <div class="ld-card">
+          <div
+            v-else-if="rid === 'commits'"
+            class="ld-card region"
+            :class="regionCls('commits')"
+            :draggable="armedRegion === 'commits'"
+            title="长按拖动可与其他区域换位"
+            @mousedown="onRegionMouseDown('commits', $event)"
+            @mouseup="onRegionMouseUp"
+            @mouseleave="clearPressTimer"
+            @dragstart="onRegionDragStart('commits', $event)"
+            @dragover="onRegionDragOver('commits', $event)"
+            @dragleave="onRegionDragLeave('commits')"
+            @drop="onRegionDrop('commits', $event)"
+            @dragend="onRegionDragEnd"
+          >
         <div class="card-title">最近提交活动</div>
         <div class="m-note text-tertiary" style="margin-top:0;margin-bottom:6px">每个项目的最后一次提交</div>
         <div v-if="!commits.length" class="empty">暂无提交动态</div>
@@ -354,6 +415,8 @@
           </div>
           <span class="commit-time text-tertiary">{{ c.timeAgo || pushTimeAgo(c.committedAt) }}</span>
         </div>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -361,7 +424,7 @@
     <el-dialog
       v-model="dialogVisible"
       :title="form.id ? '编辑项目' : '新建项目'"
-      width="520px"
+      width="min(520px, 94%)"
       :close-on-click-modal="false"
       class="ld-dialog"
       modal-class="ld-overlay"
@@ -415,7 +478,7 @@
     <el-dialog
       v-model="detailDialog.visible"
       title="需求详情"
-      width="760px"
+      width="min(760px, 94%)"
       :close-on-click-modal="true"
       class="ld-dialog req-detail-dialog"
       modal-class="ld-overlay"
@@ -521,7 +584,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import StatCard from "@/components/StatCard.vue";
 import ProgressBar from "@/components/ProgressBar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -1252,40 +1315,185 @@ function syncTagCls(p: any) {
   }
 }
 
+// ===== 区域看板：长按拖拽换位 + 列数自适应屏幕宽度 =====
+type RegionId = "projects" | "reqs" | "milestones" | "commits";
+const REGION_ORDER_KEY = "lifedesk-project-region-order";
+const DEFAULT_REGIONS: RegionId[] = ["projects", "reqs", "milestones", "commits"];
+
+function loadRegionOrder(): RegionId[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(REGION_ORDER_KEY) || "[]");
+    if (!Array.isArray(arr)) return [...DEFAULT_REGIONS];
+    const valid = arr.filter((x): x is RegionId => DEFAULT_REGIONS.includes(x));
+    // 兜底：新版本新增的区域追加到末尾
+    return [...valid, ...DEFAULT_REGIONS.filter((x) => !valid.includes(x))];
+  } catch {
+    return [...DEFAULT_REGIONS];
+  }
+}
+
+const regionOrder = ref<RegionId[]>(loadRegionOrder());
+
+function saveRegionOrder() {
+  localStorage.setItem(REGION_ORDER_KEY, JSON.stringify(regionOrder.value));
+}
+
+/** 看板容器：ResizeObserver 监测宽度 → 决定列数（>=1100px 两列，否则单列） */
+const boardEl = ref<HTMLElement | null>(null);
+const boardCols = ref(2);
+let boardRO: ResizeObserver | null = null;
+
+const boardColumns = computed<RegionId[][]>(() => {
+  const cols: RegionId[][] = Array.from({ length: boardCols.value }, () => []);
+  regionOrder.value.forEach((id, i) => cols[i % boardCols.value].push(id));
+  return cols;
+});
+
+// ===== 长按进入拖拽（避免与卡片内点击/滚动冲突） =====
+const armedRegion = ref<RegionId | null>(null); // 长按后武装：draggable 生效
+const draggingRegion = ref<RegionId | null>(null);
+const dropTarget = ref<RegionId | null>(null);
+let pressTimer: ReturnType<typeof setTimeout> | null = null;
+
+function onRegionMouseDown(id: RegionId, e: MouseEvent) {
+  if (e.button !== 0) return;
+  const t = e.target as HTMLElement;
+  // 交互元素（按钮/输入框/表格等）上长按不进入拖拽，避免干扰正常操作
+  if (
+    t.closest(
+      "button, a, input, select, textarea, .el-table, .el-input, .el-select, .el-radio-group, .el-button, .pr-view-btn"
+    )
+  ) {
+    return;
+  }
+  clearPressTimer();
+  pressTimer = setTimeout(() => {
+    armedRegion.value = id;
+  }, 280);
+}
+
+function clearPressTimer() {
+  if (pressTimer) {
+    clearTimeout(pressTimer);
+    pressTimer = null;
+  }
+}
+
+/** 未发生拖动的 mouseup：取消长按武装（否则松手后元素仍 draggable，再移动会误拖） */
+function onRegionMouseUp() {
+  clearPressTimer();
+  armedRegion.value = null;
+}
+
+function onRegionDragStart(id: RegionId, e: DragEvent) {
+  draggingRegion.value = id;
+  e.dataTransfer?.setData("text/plain", id);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+}
+
+function onRegionDragOver(id: RegionId, e: DragEvent) {
+  if (!draggingRegion.value || draggingRegion.value === id) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  dropTarget.value = id;
+}
+
+function onRegionDragLeave(id: RegionId) {
+  if (dropTarget.value === id) dropTarget.value = null;
+}
+
+/** 松手换位：拖起区域与目标区域互换位置，看板列布局自动重排（宽度随新位置自适应） */
+function onRegionDrop(id: RegionId, e: DragEvent) {
+  e.preventDefault();
+  const from = draggingRegion.value;
+  dropTarget.value = null;
+  if (!from || from === id) return;
+  const arr = [...regionOrder.value];
+  const fi = arr.indexOf(from);
+  const ti = arr.indexOf(id);
+  if (fi < 0 || ti < 0) return;
+  arr[fi] = id;
+  arr[ti] = from;
+  regionOrder.value = arr;
+  saveRegionOrder();
+}
+
+function onRegionDragEnd() {
+  draggingRegion.value = null;
+  armedRegion.value = null;
+  dropTarget.value = null;
+  clearPressTimer();
+}
+
+/** 区域样式类：拖拽中半透明、目标位置虚线高亮 */
+function regionCls(id: RegionId): Record<string, boolean> {
+  return {
+    armed: armedRegion.value === id,
+    dragging: draggingRegion.value === id,
+    "drop-target": dropTarget.value === id
+  };
+}
+
 onMounted(() => {
+  boardRO = new ResizeObserver((entries) => {
+    const w = entries[0]?.contentRect.width || 0;
+    boardCols.value = w >= 1100 ? 2 : 1;
+  });
+  if (boardEl.value) boardRO.observe(boardEl.value);
   load();
   loadRptPassRate();
+});
+
+onBeforeUnmount(() => {
+  boardRO?.disconnect();
+  boardRO = null;
+  clearPressTimer();
 });
 </script>
 
 <style scoped lang="scss">
 .stat-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* 自适应屏幕：空间足够时 4 列，变窄自动换行为 3/2/1 列 */
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 14px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
-.dual-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* ===== 区域看板：独立双列，列内紧凑堆叠（14px 间距），不会出现大空隙 ===== */
+.board {
+  display: flex;
+  align-items: flex-start;
   gap: 14px;
-  align-items: start;
 }
-
-/* 活跃项目占左列两行，高度匹配右侧"我的需求 + 里程碑进度"两张卡片 */
-.dual-row > .ld-card:first-child {
-  grid-row: span 2;
+.board-col {
+  flex: 1;
+  min-width: 0; /* 允许列内表格/内容随宽度收缩 */
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
-
-/* 最近提交活动在最下方跨两列 */
-.dual-row > .ld-card:last-child {
-  grid-column: 1 / -1;
+.region {
+  position: relative;
+  min-width: 0;
+  transition: box-shadow 0.15s, opacity 0.15s;
+  &.armed {
+    cursor: grabbing;
+    box-shadow: 0 0 0 1px $border-accent;
+    user-select: none;
+  }
+  &.dragging {
+    opacity: 0.4;
+  }
+  &.drop-target {
+    outline: 2px dashed $accent;
+    outline-offset: 2px;
+  }
 }
 
 /* ===== 用例通过率卡片 ===== */
 .pass-rate-card {
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 .pr-toolbar {
   display: flex;
