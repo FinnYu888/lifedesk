@@ -44,7 +44,7 @@
         </div>
       </div>
       <!-- 里程碑时间线：每日目标变更历史 -->
-      <div v-if="goalMilestones.length" class="goal-ms">
+      <div v-if="goalMilestoneStages.length" class="goal-ms">
         <div class="goal-ms-title">目标里程碑（{{ goalStage }} 个阶段）</div>
         <div class="goal-ms-list">
           <div v-for="(ms, i) in goalMilestoneStages" :key="i" class="goal-ms-row">
