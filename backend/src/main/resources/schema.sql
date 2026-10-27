@@ -406,6 +406,19 @@ CREATE TABLE IF NOT EXISTS english_punch (
     UNIQUE KEY uk_task_date(task_id, done_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='英语任务每日打卡记录';
 
+-- ========== 自定义应用（本地应用快捷启动 + 窗口画面嵌入） ==========
+CREATE TABLE IF NOT EXISTS native_app (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(128) NOT NULL COMMENT '展示名',
+    app_path VARCHAR(512) NOT NULL COMMENT '本地应用启动路径（exe/lnk等）',
+    args VARCHAR(512) DEFAULT NULL COMMENT '启动参数（可选）',
+    work_dir VARCHAR(512) DEFAULT NULL COMMENT '工作目录（可选，默认取应用所在目录）',
+    sort_order INT DEFAULT 0,
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='自定义本地应用';
+
 -- ========== 增量字段迁移说明 ==========
 -- CREATE TABLE IF NOT EXISTS 不会更新已存在的表，新增字段由 DatabaseMigration Runner
 -- 在启动后用 JDBC 检查 INFORMATION_SCHEMA 并 ALTER TABLE ADD COLUMN（精确无副作用）。
