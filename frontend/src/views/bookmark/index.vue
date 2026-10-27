@@ -65,18 +65,9 @@
               @click="onLinkClick($event, item, i)"
               @pointerdown="onLinkPointerDown($event, i)"
             >
-              <!-- 网页截图 -->
-              <div class="screenshot">
-                <img
-                  :key="imgKey(item)"
-                  :src="screenshotOf(item)"
-                  loading="lazy"
-                  @error="onImgError($event, item)"
-                  @load="onImgLoad($event, item)"
-                />
-                <div v-if="!imgLoaded[item.id!]" class="shot-placeholder">
-                  <el-icon><Picture /></el-icon>
-                </div>
+              <!-- 主题色横幅：取自桌面 8 张微信图片的主题色，按卡片序号循环 -->
+              <div class="theme-banner" :style="themeStyle(i)">
+                <span class="banner-letter">{{ (item.name || "?").charAt(0).toUpperCase() }}</span>
               </div>
               <!-- 信息区：填充背景色让文字更突出 -->
               <div class="info">
@@ -101,14 +92,8 @@
               </div>
               <!-- 卡片操作 -->
               <div class="card-actions" @click.stop @pointerdown.stop>
-                <el-icon
-                  v-if="!item.screenshot"
-                  class="op"
-                  title="重新截图（403/404 占位图时点击刷新）"
-                  @click="refreshScreenshot(item)"
-                ><RefreshRight /></el-icon>
-                <el-icon class="op" @click="openEdit(item)"><Edit /></el-icon>
-                <el-icon class="op danger" @click="onDelete(item)"><Delete /></el-icon>
+                <el-icon class="op op-edit" title="编辑" @click="openEdit(item)"><Edit /></el-icon>
+                <el-icon class="op op-del" title="删除" @click="onDelete(item)"><Delete /></el-icon>
               </div>
             </div>
 
@@ -133,8 +118,8 @@
                   <button class="close-btn" @click="closeDetail">
                     <el-icon><Close /></el-icon>
                   </button>
-                  <div class="detail-shot">
-                    <img :key="imgKey(links[detailIdx])" :src="screenshotOf(links[detailIdx])" @error="onImgError($event, links[detailIdx])" />
+                  <div class="detail-shot" :style="themeStyle(detailIdx)">
+                    <span class="banner-letter detail-letter">{{ (links[detailIdx].name || "?").charAt(0).toUpperCase() }}</span>
                   </div>
                   <div class="detail-info">
                     <div class="tags">
@@ -153,13 +138,6 @@
                       </button>
                       <button class="ld-btn ld-btn-ghost" @click="openEdit(links[detailIdx])">
                         <el-icon><Edit /></el-icon> 编辑
-                      </button>
-                      <button
-                        v-if="!links[detailIdx].screenshot"
-                        class="ld-btn ld-btn-ghost"
-                        @click="refreshScreenshot(links[detailIdx])"
-                      >
-                        <el-icon><RefreshRight /></el-icon> 重新截图
                       </button>
                     </div>
                   </div>
@@ -226,8 +204,8 @@
                 <span class="note-time">{{ formatTime(item.updateTime || item.createTime) }}</span>
               </div>
               <div class="card-actions" @click.stop @pointerdown.stop>
-                <el-icon class="op" @click="openEdit(item)"><Edit /></el-icon>
-                <el-icon class="op danger" @click="onDelete(item)"><Delete /></el-icon>
+                <el-icon class="op op-edit" title="编辑" @click="openEdit(item)"><Edit /></el-icon>
+                <el-icon class="op op-del" title="删除" @click="onDelete(item)"><Delete /></el-icon>
               </div>
             </div>
 
@@ -329,14 +307,6 @@
               </el-select>
             </div>
           </div>
-          <div class="modal-row">
-            <label>截图 URL（留空自动从公开截图服务生成）</label>
-            <el-input
-              v-model="form.screenshot"
-              placeholder="图片 URL / 本地路径（如 D:\pics\login.png），留空自动截图"
-              clearable
-            />
-          </div>
         </template>
         <div class="modal-footer">
           <button class="ld-btn ld-btn-ghost" @click="dialogVisible = false">取消</button>
@@ -354,8 +324,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   Search, Plus, Link, Document, Edit, Delete,
-  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Close, Picture, CopyDocument,
-  RefreshRight
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Close, CopyDocument
 } from "@element-plus/icons-vue";
 import {
   fetchFavorites,
@@ -379,10 +348,6 @@ const dragStartX = ref(0);
 const dragDeltaX = ref(0);          // 拖拽+惯性过程中的连续像素位置（往右为正）
 const dragging = ref(false);
 const detailIdx = ref(-1);
-const imgLoaded = ref<Record<number, boolean>>({});
-// 截图重试链状态：nonce=刷新时间戳（穿透 mShots 缓存）；attempt=降级档位（0=mShots 1=thum.io）
-const shotNonce = ref<Record<number, number>>({});
-const shotAttempt = ref<Record<number, number>>({});
 // cover flow 中心卡索引
 const currentLinkIdx = ref(0);
 let autoLinkTimer: any = null;
@@ -461,7 +426,6 @@ async function load() {
     hoverNoteIdx.value = -1;
     dragNoteIdx.value = -1;
     detailNoteIdx.value = -1;
-    imgLoaded.value = {};
     currentLinkIdx.value = 0;
     currentNoteIdx.value = 0;
   } catch {
@@ -474,75 +438,24 @@ function onSearch() {
   searchTimer = setTimeout(load, 250);
 }
 
-// ===== 截图 URL 兜底：用户没填时用 mShots 公开截图服务 =====
-// 支持三类来源：
-//   1. http(s):// 或 data: 开头 → 直接使用
-//   2. 本地图片绝对路径（C:\... / C:/... / file:///... / /home/...）→ 走后端代理
-//      /local-file?path=xxx（浏览器禁止 http 页面加载 file:// 图片，须由后端读流返回）
-//   3. 未填 → mShots 公开截图服务
-function isLocalImagePath(s: string): boolean {
-  return /^[a-zA-Z]:[\\/]/.test(s)        // Windows 盘符 C:\ 或 C:/
-    || s.startsWith("file://")             // file:/// 协议
-    || (s.startsWith("/") && !s.startsWith("//"));  // Unix 绝对路径（排除 //host 协议相对）
-}
+// ===== 主题色横幅：取自桌面 8 张微信图片的主题色，按卡片序号循环分配 =====
+const THEME_COLORS = [
+  "#a71e36", // 红莓
+  "#ab6e2e", // 琥珀
+  "#3c608a", // 海蓝
+  "#5a6e33", // 橄榄绿
+  "#43929a", // 青
+  "#a48a34", // 金黄
+  "#a3607c", // 玫瑰
+  "#623b5e"  // 紫红
+];
 
-function screenshotOf(item: Favorite): string {
-  const s = (item.screenshot || "").trim();
-  if (s) {
-    if (isLocalImagePath(s)) {
-      return `/api/local-file?path=${encodeURIComponent(s)}`;
-    }
-    return s;
-  }
-  if (!item.value) return "";
-  // 截图源按重试次数降级：0=mShots（带时间戳穿透缓存）→ 1=thum.io 真实截图
-  const nonce = shotNonce.value[item.id!] || 0;
-  const attempt = shotAttempt.value[item.id!] || 0;
-  if (attempt === 0) {
-    const ts = nonce ? `&t=${nonce}` : "";
-    return `https://s.wordpress.com/mshots/v1/${encodeURIComponent(item.value)}?w=480&h=320${ts}`;
-  }
-  return `https://image.thum.io/get/width/480/crop/320/noanimate/${item.value}`;
-}
-
-/**
- * 刷新截图：重置重试链 + 时间戳穿透 mShots 缓存，强制按链接重新截图。
- * mShots 首次截图可能拿到 403/404 占位图，点击刷新让其重新抓取。
- */
-function refreshScreenshot(item: Favorite) {
-  if (!item.id) return;
-  shotAttempt.value[item.id] = 0;
-  shotNonce.value[item.id] = Date.now();
-  imgLoaded.value[item.id] = false;
-  ElMessage.info("正在重新截图，稍候几秒即可看到最新效果");
-}
-
-function onImgError(e: Event, item: Favorite) {
-  // 加载失败 → 降级截图源：mShots 失败换 thum.io，最后 favicon 兜底
-  const img = e.target as HTMLImageElement;
-  if (!item.value || !item.id) return;
-  const attempt = shotAttempt.value[item.id] || 0;
-  if (attempt < 1) {
-    shotAttempt.value[item.id] = attempt + 1;
-    img.src = screenshotOf(item);
-    return;
-  }
-  try {
-    const u = new URL(item.value);
-    img.src = `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=128`;
-  } catch {
-    img.src = "";
-  }
-}
-
-function onImgLoad(e: Event, item: Favorite) {
-  if (item.id) imgLoaded.value[item.id] = true;
-}
-
-/** img 的 key：nonce/attempt 变化时强制重建元素触发重新加载 */
-function imgKey(item: Favorite): string {
-  if (!item.id) return "0-0";
-  return `${shotNonce.value[item.id] || 0}-${shotAttempt.value[item.id] || 0}`;
+function themeStyle(i: number): Record<string, string> {
+  const c = THEME_COLORS[((i % THEME_COLORS.length) + THEME_COLORS.length) % THEME_COLORS.length];
+  return {
+    background: `linear-gradient(135deg, ${c} 0%, ${c}cc 55%, ${c}88 100%)`,
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.18), 0 6px 18px ${c}55`
+  };
 }
 
 // ===== 标签样式映射 =====
@@ -984,7 +897,16 @@ async function onSubmit() {
 
 async function onDelete(item: Favorite) {
   try {
-    await ElMessageBox.confirm(`确定删除「${item.name}」？`, "提示", { type: "warning" });
+    await ElMessageBox.confirm(
+      `确定要删除「${item.name}」吗？删除后不可恢复！`,
+      "删除确认",
+      {
+        type: "warning",
+        confirmButtonText: "确认删除",
+        cancelButtonText: "取消",
+        confirmButtonClass: "ld-del-confirm-btn"
+      }
+    );
     await deleteFavorite(item.id!);
     ElMessage.success("已删除");
     await load();
@@ -1158,52 +1080,74 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
-.screenshot {
+/* ========== 主题色横幅（替代网页截图，取自 8 张微信图片主题色） ========== */
+.theme-banner {
   position: relative;
   width: 100%;
-  height: 177px;      /* 221 → 177，随卡片高度同步降 20% */
-  background: rgba(0, 0, 0, 0.25);
+  height: 150px;
   overflow: hidden;
   border-bottom: 1px solid $border-subtle;
-}
-.screenshot img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: top;
-  display: block;
-}
-.shot-placeholder {
-  position: absolute;
-  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: $text-tertiary;
-  font-size: 32px;
-  background: linear-gradient(135deg, rgba(167, 139, 250, 0.08), rgba(196, 181, 253, 0.04));
+  /* 右上光斑装饰 */
+  &::before {
+    content: '';
+    position: absolute;
+    top: -40px;
+    right: -40px;
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    filter: blur(2px);
+  }
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: -50px;
+    left: -30px;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.14);
+    filter: blur(2px);
+  }
+}
+.banner-letter {
+  font-size: 64px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.35);
+  letter-spacing: 2px;
+  z-index: 1;
+}
+.detail-letter {
+  font-size: 88px;
 }
 .info {
   flex: 1;
-  padding: 12px 16px 10px;
+  padding: 14px 18px 12px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  /* 下半截填充背景色，让 name/url/tags 文字展示更突出 */
-  background: linear-gradient(180deg, rgba(20, 14, 38, 0.45), rgba(20, 14, 38, 0.7));
-  border-top: 1px solid rgba(196, 181, 253, 0.08);
+  gap: 7px;
+  /* 下半截填充更深的背景色，让 name/url/tags 文字更突出 */
+  background: linear-gradient(180deg, rgba(12, 8, 26, 0.72), rgba(12, 8, 26, 0.92));
+  border-top: 1px solid rgba(196, 181, 253, 0.14);
 }
 .name {
-  font-size: 14px;
-  font-weight: 600;
-  color: $text-primary;
+  font-size: 19px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.3px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .url {
-  font-size: 10px;
-  color: $accent-light;
+  font-size: 13px;
+  color: #d8ccff;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -1212,14 +1156,14 @@ onBeforeUnmount(() => {
 .tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 4px;
+  gap: 6px;
+  margin-top: 5px;
 }
 .tag {
-  font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 8px;
-  font-weight: 600;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 9px;
+  font-weight: 700;
   letter-spacing: 0.3px;
   white-space: nowrap;
 }
@@ -1347,36 +1291,42 @@ onBeforeUnmount(() => {
 
 .card-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 10px;
+  right: 10px;
   display: flex;
-  gap: 6px;
-  opacity: 0;
-  transition: opacity 0.18s;
-  pointer-events: none;
+  gap: 8px;
+  /* 常显（不再 hover 才出现），一眼可见 */
+  opacity: 0.92;
   z-index: 5;
-}
-.stack-card:hover .card-actions,
-.stack-card.hovered .card-actions {
-  opacity: 1;
-  pointer-events: auto;
 }
 .op {
   cursor: pointer;
-  color: $text-primary;
-  font-size: 14px;
-  background: rgba(0, 0, 0, 0.45);
-  padding: 5px;
-  border-radius: 6px;
-  border: 1px solid $border-glass;
-  backdrop-filter: blur(4px);
-  &:hover {
-    color: $accent-light;
-    border-color: $border-accent;
+  color: #fff;
+  font-size: 18px;
+  padding: 8px;
+  border-radius: 9px;
+  display: flex;
+  transition: all 0.15s;
+  /* 编辑：紫色实底，醒目 */
+  &.op-edit {
+    background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    box-shadow: 0 3px 10px rgba(139, 92, 246, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    &:hover {
+      transform: scale(1.12);
+      box-shadow: 0 4px 14px rgba(139, 92, 246, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
   }
-  &.danger:hover {
-    color: #f87171;
-    border-color: rgba(248, 113, 113, 0.5);
+  /* 删除：红色实底，警示 */
+  &.op-del {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    box-shadow: 0 3px 10px rgba(239, 68, 68, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    &:hover {
+      transform: scale(1.12);
+      box-shadow: 0 4px 14px rgba(239, 68, 68, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+  }
+  &:active {
+    transform: scale(0.94);
   }
 }
 
@@ -1474,13 +1424,10 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid $border-subtle;
-  background: rgba(0, 0, 0, 0.3);
-}
-.detail-shot img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: top;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
 }
 .detail-info {
   flex: 1;
@@ -1499,8 +1446,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: $accent-light;
-  font-size: 13px;
+  color: #d8ccff;
+  font-size: 15px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all;
   text-decoration: none;
