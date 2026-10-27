@@ -87,14 +87,16 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <!-- 主题切换：深紫玻璃(glass) ⇄ 科技HUD(tech)，选择持久化 localStorage -->
+        <!-- 主题切换：深紫玻璃(glass) → 科技HUD(tech) → 奶白暖调(cream) 循环，选择持久化 localStorage -->
         <button
           class="theme-toggle"
-          :title="theme === 'tech' ? '切换到深紫玻璃风' : '切换到科技 HUD 风'"
+          :title="'当前：' + THEME_LABEL[theme] + '，点击切换下一主题'"
           @click="toggleTheme"
         >
-          <el-icon :size="18"><component :is="theme === 'tech' ? Cpu : Sunny" /></el-icon>
-          <span>{{ theme === "tech" ? "科技 HUD" : "液态玻璃" }}</span>
+          <el-icon :size="18">
+            <component :is="theme === 'tech' ? Cpu : theme === 'cream' ? MilkTea : Sunny" />
+          </el-icon>
+          <span>{{ THEME_LABEL[theme] }}</span>
         </button>
         <el-badge :value="3" class="bell">
           <el-icon :size="20"><Bell /></el-icon>
@@ -253,7 +255,8 @@ import {
   Delete,
   TopRight,
   Loading,
-  Cpu
+  Cpu,
+  MilkTea
 } from "@element-plus/icons-vue";
 import { useCustomMenus } from "@/composables/useCustomMenus";
 import { useMenuTabs } from "@/composables/useMenuTabs";
@@ -265,7 +268,7 @@ defineOptions({ name: "MainLayout" });
 const route = useRoute();
 const router = useRouter();
 // ===== 主题切换 =====
-const { theme, toggleTheme } = useTheme();
+const { theme, toggleTheme, THEME_LABEL } = useTheme();
 const pageTitle = computed(() => {
   // tab 模式下优先显示当前 tab 名
   if (tabMode.value && activeTab.value) return activeTab.value.name;
@@ -784,6 +787,16 @@ html[data-theme="tech"] .theme-toggle {
     border-color: rgba(34, 211, 238, 0.7);
     background: rgba(34, 211, 238, 0.15);
     box-shadow: 0 0 14px rgba(34, 211, 238, 0.4);
+  }
+}
+html[data-theme="cream"] .theme-toggle {
+  background: rgba(255, 255, 255, 0.7);
+  color: #7a6f5a;
+  &:hover {
+    color: #c08a3e;
+    border-color: rgba(192, 138, 62, 0.55);
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 0 12px rgba(192, 138, 62, 0.25);
   }
 }
 // bell 不再需要 margin-left:auto（theme-toggle 接管了推右）
