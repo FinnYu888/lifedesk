@@ -64,17 +64,6 @@
             <version>${jgit.version}</version>
         </dependency>
 
-        <!-- JNA：本地应用启动后枚举窗口/抓取窗口画面（自定义应用嵌入展示用） -->
-        <dependency>
-            <groupId>net.java.dev.jna</groupId>
-            <artifactId>jna</artifactId>
-            <version>5.13.0</version>
-        </dependency>
-        <dependency>
-            <groupId>net.java.dev.jna</groupId>
-            <artifactId>jna-platform</artifactId>
-            <version>5.13.0</version>
-        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

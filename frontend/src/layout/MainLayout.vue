@@ -53,27 +53,6 @@
           <el-icon><Plus /></el-icon>
           <span>新增菜单</span>
         </button>
-
-        <!-- 自定义本地应用：点击后由后端在本机真实启动（功能不变），
-             系统内以窗口实时画面嵌入展示，可一键置前回原生窗口操作 -->
-        <div class="nav-title">应用</div>
-        <div
-          v-for="a in apps"
-          :key="a.id"
-          class="nav-item custom-nav-item"
-          :class="{ 'nav-item-active': isAppTabActive(a) }"
-          :title="a.appPath"
-          @click="onAppClick(a)"
-        >
-          <el-icon><Cpu /></el-icon>
-          <span class="custom-nav-label">{{ a.name }}</span>
-          <span v-if="appStatus[a.id]?.running" class="app-run-dot" title="运行中" />
-          <el-icon class="custom-nav-del" @click.stop="onAppDelete(a)"><CircleClose /></el-icon>
-        </div>
-        <button class="nav-item nav-add" @click="openAppDialog">
-          <el-icon><Plus /></el-icon>
-          <span>新增应用</span>
-        </button>
       </nav>
 
       <!-- 今日健康迷你卡 -->
@@ -160,53 +139,30 @@
               <span class="tbi-url">{{ activeTab?.url || "" }}</span>
             </div>
             <div class="tab-toolbar-actions">
-              <!-- 应用 tab：窗口置前 / 关闭应用 / 启动应用 -->
-              <template v-if="activeTab?.type === 'app'">
-                <button
-                  class="ld-btn ld-btn-ghost"
-                  @click="onAppFocus(appRealId(activeTab!.id!))"
-                >
-                  <el-icon><TopRight /></el-icon> 窗口置前
-                </button>
-                <button
-                  v-if="appStatus[appRealId(activeTab!.id!)]?.running"
-                  class="ld-btn ld-btn-ghost danger"
-                  @click="onAppStop(appRealId(activeTab!.id!))"
-                >
-                  <el-icon><SwitchButton /></el-icon> 关闭应用
-                </button>
-                <button v-else class="ld-btn ld-btn-primary" @click="onAppLaunch(appRealId(activeTab!.id!))">
-                  <el-icon><CaretRight /></el-icon> 启动应用
-                </button>
-              </template>
-              <!-- 自定义菜单 tab：原有按钮 -->
-              <template v-else>
-                <button
-                  class="ld-btn ld-btn-ghost"
-                  :disabled="!activeTab"
-                  @click="openTabExternal"
-                >
-                  <el-icon><TopRight /></el-icon> 新窗口
-                </button>
-                <button
-                  class="ld-btn ld-btn-ghost"
-                  :disabled="!activeTab"
-                  @click="onTabEdit"
-                >
-                  <el-icon><Edit /></el-icon> 编辑
-                </button>
-                <button
-                  class="ld-btn ld-btn-ghost danger"
-                  :disabled="!activeTab"
-                  @click="onTabDelete"
-                >
-                  <el-icon><Delete /></el-icon> 删除
-                </button>
-              </template>
+              <button
+                class="ld-btn ld-btn-ghost"
+                :disabled="!activeTab"
+                @click="openTabExternal"
+              >
+                <el-icon><TopRight /></el-icon> 新窗口
+              </button>
+              <button
+                class="ld-btn ld-btn-ghost"
+                :disabled="!activeTab"
+                @click="onTabEdit"
+              >
+                <el-icon><Edit /></el-icon> 编辑
+              </button>
+              <button
+                class="ld-btn ld-btn-ghost danger"
+                :disabled="!activeTab"
+                @click="onTabDelete"
+              >
+                <el-icon><Delete /></el-icon> 删除
+              </button>
             </div>
           </div>
-          <!-- 多实例内容区：app tab 渲染窗口画面流；custom tab 渲染 iframe。
-               用 v-show 切换显隐，不销毁，保留登录态与滚动位置 -->
+          <!-- 多实例内容区：每个 custom tab 一个 iframe，v-show 切换显隐，不销毁，保留登录态与滚动位置 -->
           <div class="tab-frames">
             <div
               v-for="t in tabs"
@@ -214,42 +170,19 @@
               class="tab-frame-item"
               v-show="t.id === activeTabId"
             >
-              <!-- 本地应用：窗口实时画面 -->
-              <div v-if="t.type === 'app'" class="app-screen">
-                <img
-                  v-if="screenshotNonce[t.id]"
-                  class="app-screen-img"
-                  :src="screenshotUrl(appRealId(t.id), screenshotNonce[t.id])"
-                  alt="应用窗口画面"
-                  @error="onShotError(t.id)"
-                />
-                <div v-else class="app-screen-empty">
-                  <el-icon :size="30"><Monitor /></el-icon>
-                  <span>正在连接应用窗口…</span>
-                  <span class="loading-hint">应用启动后画面会自动显示；未启动时可点击上方「启动应用」</span>
-                </div>
-                <div v-if="shotFailed[t.id]" class="app-screen-empty">
-                  <el-icon :size="30"><Monitor /></el-icon>
-                  <span>暂无画面（应用未运行或窗口未就绪）</span>
-                  <span class="loading-hint">可点击上方「启动应用」或把应用窗口调出后自动恢复</span>
-                </div>
+              <div v-if="!iframeLoaded[t.id]" class="iframe-loading">
+                <el-icon class="loading-icon" :size="28"><Loading /></el-icon>
+                <span>正在加载 {{ t.name }}…</span>
+                <span class="loading-hint">如长时间无响应，可点击「新窗口」打开</span>
               </div>
-              <!-- 网站菜单：iframe -->
-              <template v-else>
-                <div v-if="!iframeLoaded[t.id]" class="iframe-loading">
-                  <el-icon class="loading-icon" :size="28"><Loading /></el-icon>
-                  <span>正在加载 {{ t.name }}…</span>
-                  <span class="loading-hint">如长时间无响应，可点击「新窗口」打开</span>
-                </div>
-                <iframe
-                  :src="t.url"
-                  frameborder="0"
-                  allow="fullscreen; clipboard-read; clipboard-write; encrypted-media; autoplay; picture-in-picture"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-presentation"
-                  referrerpolicy="no-referrer"
-                  @load="onIframeLoad(t.id)"
-                />
-              </template>
+              <iframe
+                :src="t.url"
+                frameborder="0"
+                allow="fullscreen; clipboard-read; clipboard-write; encrypted-media; autoplay; picture-in-picture"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-presentation"
+                referrerpolicy="no-referrer"
+                @load="onIframeLoad(t.id)"
+              />
             </div>
           </div>
         </div>
@@ -295,71 +228,11 @@
         </div>
       </div>
     </div>
-
-    <!-- 新增自定义本地应用弹窗 -->
-    <div v-if="appDialogVisible" class="modal-overlay" @click.self="appDialogVisible = false">
-      <div class="modal ld-card">
-        <div class="modal-title">新增本地应用</div>
-        <div class="modal-row">
-          <label>应用名称</label>
-          <el-input v-model="appForm.name" placeholder="如 计算器 / IDEA / 微信" maxlength="64" />
-        </div>
-        <div class="modal-row">
-          <label>启动路径</label>
-          <div class="path-row">
-            <el-input v-model="appForm.appPath" placeholder="C:\Windows\System32\calc.exe" />
-            <button class="ld-btn ld-btn-ghost nowrap" @click="openBrowse('')">
-              <el-icon><FolderOpened /></el-icon> 浏览
-            </button>
-          </div>
-        </div>
-        <div class="modal-row">
-          <label>启动参数</label>
-          <el-input v-model="appForm.args" placeholder="可选，如 --minimized" />
-        </div>
-        <div class="modal-hint">
-          保存后点击应用即在本机真实启动（原功能不变）；系统内展示窗口实时画面，
-          点「窗口置前」切回原生窗口操作。支持 exe / lnk / bat。
-        </div>
-        <div class="modal-footer">
-          <button class="ld-btn ld-btn-ghost" @click="appDialogVisible = false">取消</button>
-          <button class="ld-btn ld-btn-primary" :disabled="appSubmitting" @click="onAppSubmit">
-            {{ appSubmitting ? "保存中…" : "保存" }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 目录浏览对话框：选择本地应用启动路径 -->
-    <div v-if="browseVisible" class="modal-overlay" @click.self="browseVisible = false">
-      <div class="modal ld-card browse-modal">
-        <div class="modal-title">选择应用 · {{ browsePath || "此电脑" }}</div>
-        <div class="browse-list">
-          <div v-if="browseParent !== null && browseParent !== undefined" class="browse-item" @click="openBrowse(browseParent || '')">
-            <span class="bi-icon">↩</span>
-            <span class="bi-name">上级目录</span>
-          </div>
-          <div
-            v-for="it in browseItems"
-            :key="it.path"
-            class="browse-item"
-            @click="it.dir ? openBrowse(it.path) : pickAppPath(it.path)"
-          >
-            <span class="bi-icon">{{ it.dir ? "📁" : "⚙" }}</span>
-            <span class="bi-name">{{ it.name }}</span>
-          </div>
-          <div v-if="!browseItems.length" class="browse-item browse-empty">空目录</div>
-        </div>
-        <div class="modal-footer">
-          <button class="ld-btn ld-btn-ghost" @click="browseVisible = false">取消</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -373,6 +246,7 @@ import {
   Trophy,
   Collection,
   Reading,
+  Cpu,
   Sunny,
   Plus,
   Link,
@@ -382,29 +256,12 @@ import {
   Delete,
   TopRight,
   Loading,
-  Cpu,
-  MilkTea,
-  SwitchButton,
-  CaretRight,
-  FolderOpened
+  MilkTea
 } from "@element-plus/icons-vue";
 import { useCustomMenus } from "@/composables/useCustomMenus";
 import { useMenuTabs } from "@/composables/useMenuTabs";
 import { useTheme } from "@/composables/useTheme";
 import type { CustomMenu } from "@/api/customMenu";
-import {
-  fetchNativeApps,
-  createNativeApp,
-  deleteNativeApp,
-  launchNativeApp,
-  stopNativeApp,
-  focusNativeApp,
-  fetchNativeAppStatus,
-  nativeAppScreenshotUrl,
-  browseLocalDir,
-  type NativeAppItem,
-  type BrowseItem
-} from "@/api/nativeApp";
 
 defineOptions({ name: "MainLayout" });
 
@@ -427,7 +284,8 @@ const navItems = [
   { path: "/skill", label: "Skills 工坊", icon: Trophy },
   { path: "/bookmark", label: "收藏与笔记", icon: Collection },
   { path: "/english", label: "英语提升", icon: Reading },
-  { path: "/health", label: "个人健康", icon: Sunny }
+  { path: "/health", label: "个人健康", icon: Sunny },
+  { path: "/apps", label: "常用App", icon: Cpu }
 ];
 
 // ===== 侧栏菜单拖拽排序（内置 + 自定义统一持久化到 localStorage） =====
@@ -517,8 +375,6 @@ const {
   tabMode,
   openTab,
   openBuiltinTab,
-  openAppTab,
-  appRealId,
   closeTab,
   activateTab,
   removeTab
@@ -685,193 +541,7 @@ async function onTabDelete() {
 
 onMounted(() => {
   loadCustomMenus();
-  loadApps();
-  // 应用画面轮询：仅对激活的 app tab 每 1.2s 拉一帧；同时每 4s 刷新运行状态
-  screenshotTimer = window.setInterval(pollActiveAppScreenshot, 1200);
-  statusTimer = window.setInterval(refreshAppStatus, 4000);
 });
-
-onBeforeUnmount(() => {
-  clearInterval(screenshotTimer);
-  clearInterval(statusTimer);
-});
-
-// ===== 自定义本地应用：启动 + 窗口画面嵌入 =====
-const apps = ref<NativeAppItem[]>([]);
-const appStatus = ref<Record<number, any>>({});
-/** 截图帧 nonce（变化触发 img 重新加载），按 tab id 索引 */
-const screenshotNonce = ref<Record<number, number>>({});
-/** 截图失败标记（显示占位提示），按 tab id 索引 */
-const shotFailed = ref<Record<number, boolean>>({});
-let screenshotTimer: number | null = null;
-let statusTimer: number | null = null;
-
-async function loadApps() {
-  try {
-    const r = await fetchNativeApps();
-    apps.value = (r as any).data || [];
-    refreshAppStatus();
-  } catch {
-    /* 拦截器已提示 */
-  }
-}
-
-async function refreshAppStatus() {
-  try {
-    const r = await fetchNativeAppStatus();
-    appStatus.value = (r as any).data || {};
-  } catch {
-    /* ignore */
-  }
-}
-
-function pollActiveAppScreenshot() {
-  const t = activeTab.value;
-  if (t?.type === "app" && t.id != null) {
-    screenshotNonce.value = { ...screenshotNonce.value, [t.id]: Date.now() };
-  }
-}
-
-function screenshotUrl(appId: number, nonce: number) {
-  return nativeAppScreenshotUrl(appId, nonce);
-}
-
-function onShotError(tabId: number) {
-  shotFailed.value = { ...shotFailed.value, [tabId]: true };
-}
-
-/** 侧栏点击应用：打开 tab；未运行则自动启动 */
-async function onAppClick(a: NativeAppItem) {
-  openAppTab(a);
-  shotFailed.value = { ...shotFailed.value, [100000 + a.id]: false };
-  if (!appStatus.value[a.id]?.running) {
-    try {
-      await launchNativeApp(a.id);
-    } catch {
-      /* 拦截器已提示 */
-    }
-    refreshAppStatus();
-  }
-}
-
-async function onAppLaunch(id: number) {
-  try {
-    await launchNativeApp(id);
-    ElMessage.success("应用已启动");
-  } catch {
-    /* 拦截器已提示 */
-  }
-  refreshAppStatus();
-}
-
-async function onAppFocus(id: number) {
-  try {
-    await focusNativeApp(id);
-  } catch {
-    /* 拦截器已提示 */
-  }
-}
-
-async function onAppStop(id: number) {
-  try {
-    await ElMessageBox.confirm("确定关闭该应用进程？未保存的数据会丢失。", "关闭应用", {
-      confirmButtonText: "关闭",
-      cancelButtonText: "取消",
-      type: "warning"
-    });
-  } catch {
-    return;
-  }
-  try {
-    await stopNativeApp(id);
-    ElMessage.success("应用已关闭");
-  } catch {
-    /* 拦截器已提示 */
-  }
-  refreshAppStatus();
-}
-
-async function onAppDelete(a: NativeAppItem) {
-  try {
-    await ElMessageBox.confirm(`确定删除应用「${a.name}」？`, "删除确认", {
-      confirmButtonText: "删除",
-      cancelButtonText: "取消",
-      type: "warning"
-    });
-  } catch {
-    return;
-  }
-  try {
-    await deleteNativeApp(a.id);
-    // 同步关闭对应 tab（tab id = 100000 + appId）
-    removeTab(100000 + a.id);
-    ElMessage.success("已删除");
-  } catch {
-    /* 拦截器已提示 */
-  }
-  loadApps();
-}
-
-function isAppTabActive(a: NativeAppItem): boolean {
-  return activeTab.value?.type === "app" && appRealId(activeTab.value.id!) === a.id;
-}
-
-// ===== 新增应用弹窗 =====
-const appDialogVisible = ref(false);
-const appSubmitting = ref(false);
-const appForm = ref<Partial<NativeAppItem>>({});
-
-function openAppDialog() {
-  appForm.value = {};
-  appDialogVisible.value = true;
-}
-
-async function onAppSubmit() {
-  if (!appForm.value.name?.trim() || !appForm.value.appPath?.trim()) {
-    ElMessage.warning("请填写应用名称和启动路径");
-    return;
-  }
-  appSubmitting.value = true;
-  try {
-    await createNativeApp(appForm.value);
-    appDialogVisible.value = false;
-    ElMessage.success("应用已保存，点击侧栏应用即可启动");
-    loadApps();
-  } catch {
-    /* 拦截器已提示 */
-  } finally {
-    appSubmitting.value = false;
-  }
-}
-
-// ===== 目录浏览（选择启动路径） =====
-const browseVisible = ref(false);
-const browsePath = ref("");
-const browseParent = ref<string | null>(null);
-const browseItems = ref<BrowseItem[]>([]);
-
-async function openBrowse(dir: string) {
-  try {
-    const r = await browseLocalDir(dir);
-    const d = (r as any).data || {};
-    browsePath.value = d.path || "";
-    browseParent.value = d.parent;
-    browseItems.value = d.items || [];
-    browseVisible.value = true;
-  } catch {
-    /* 拦截器已提示 */
-  }
-}
-
-function pickAppPath(path: string) {
-  appForm.value.appPath = path;
-  if (!appForm.value.name?.trim()) {
-    // 默认名取文件名去扩展名
-    const base = path.split("\\").pop() || path;
-    appForm.value.name = base.replace(/\.(exe|lnk|bat|cmd|url|jar)$/i, "");
-  }
-  browseVisible.value = false;
-}
 </script>
 
 <style scoped lang="scss">
@@ -1419,102 +1089,6 @@ html[data-theme="cream"] .theme-toggle {
   &:hover:not(:disabled) {
     box-shadow: 0 4px 14px rgba(167, 139, 250, 0.35);
     color: #fff;
-  }
-}
-
-/* ===== 自定义本地应用 ===== */
-// 侧栏运行状态点
-.app-run-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #34d399;
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
-  flex-shrink: 0;
-}
-// 路径输入行（输入框 + 浏览按钮）
-.path-row {
-  display: flex;
-  gap: 8px;
-  .el-input {
-    flex: 1;
-  }
-  .nowrap {
-    white-space: nowrap;
-  }
-}
-// 应用窗口画面区
-.app-screen {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.25);
-  overflow: hidden;
-}
-.app-screen-img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
-}
-.app-screen-empty {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: $text-tertiary;
-  font-size: 14px;
-  background: inherit;
-  .loading-hint {
-    font-size: 12px;
-    opacity: 0.8;
-  }
-}
-// 目录浏览对话框
-.browse-modal {
-  width: min(620px, 92%);
-}
-.browse-list {
-  max-height: 46vh;
-  overflow-y: auto;
-  border: 1px solid $border-subtle;
-  border-radius: $radius-sm;
-  padding: 4px;
-}
-.browse-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  color: $text-secondary;
-  transition: background 0.12s;
-  &:hover {
-    background: rgba(167, 139, 250, 0.1);
-    color: $text-primary;
-  }
-  .bi-icon {
-    width: 20px;
-    text-align: center;
-    flex-shrink: 0;
-  }
-  .bi-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  &.browse-empty {
-    cursor: default;
-    justify-content: center;
-    color: $text-tertiary;
   }
 }
 

@@ -61,6 +61,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "个人健康" }
       },
       {
+        // 常用App：桌面快捷方式风格的本机应用启动器，点击即真实启动（不嵌入窗口）
+        path: "apps",
+        name: "Apps",
+        component: () => import("@/views/apps/index.vue"),
+        meta: { title: "常用App" }
+      },
+      {
         // 自定义菜单嵌入页：通过 iframe 把目标网站嵌入当前系统展示
         // url/name/id 由 MainLayout 在 router.push 的 query 里携带
         path: "custom",

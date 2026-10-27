@@ -3,11 +3,10 @@ import { ref, computed } from "vue";
 /**
  * 菜单「多 Tab」共享状态（内置工作台菜单 + 自定义 iframe 菜单统一管理）。
  *
- * <p>三类 tab：</p>
+ * <p>两类 tab：</p>
  * <ul>
  *   <li>custom：自定义菜单，iframe 嵌入，id 为后端菜单 id（正数），tabMode=true 显示 iframe 区</li>
  *   <li>builtin：工作台内置菜单（首页/项目管理等），id 为路由 path 的负数 hash，激活时 router 跳转、显示 router-view</li>
- *   <li>app：自定义本地应用，窗口画面嵌入展示，id 为应用 id + APP_ID_OFFSET 偏移（避免与菜单 id 冲突）</li>
  * </ul>
  *
  * <p>模块级单例（multiple components import the same instance），与 Pinia store 同理。</p>
@@ -21,16 +20,13 @@ export interface MenuTab {
   path?: string;
   /** custom: 图标名字符串；builtin: 图标组件 */
   icon?: any;
-  type?: "custom" | "builtin" | "app";
+  type?: "custom" | "builtin";
 }
 
 const tabs = ref<MenuTab[]>([]);
 const activeTabId = ref<number | null>(null);
 /** 是否处于 tab 视图模式（true=显示自定义菜单 iframe 区；false=显示 router-view） */
 const tabMode = ref(false);
-
-/** 应用 tab id 偏移量：菜单 id 从 1 递增，应用 tab id = 100000 + appId，天然不冲突 */
-const APP_ID_OFFSET = 100000;
 
 /** 由路由 path 生成稳定的负数 tab id（与后端正数菜单 id 天然不冲突） */
 function builtinTabId(path: string): number {
@@ -43,24 +39,6 @@ function builtinTabId(path: string): number {
 function applyMode(): void {
   const t = tabs.value.find((x) => x.id === activeTabId.value);
   tabMode.value = !!t && t.type !== "builtin";
-}
-
-/** 把一个自定义本地应用「打开」为 tab：已开 → 激活；未开 → 追加并激活 */
-function openAppTab(app: { id: number; name: string }): void {
-  const id = APP_ID_OFFSET + app.id;
-  const exist = tabs.value.find((t) => t.id === id);
-  if (!exist) {
-    tabs.value.push({ id, name: app.name, type: "app" });
-  } else {
-    exist.name = app.name;
-  }
-  activeTabId.value = id;
-  applyMode();
-}
-
-/** 应用 tab id → 应用真实 id（MainLayout 渲染截图流时换算） */
-function appRealId(tabId: number): number {
-  return tabId - APP_ID_OFFSET;
 }
 
 /** 打开/激活内置菜单 tab：已开 → 激活；未开 → 追加并激活（不重复开） */
@@ -155,8 +133,6 @@ export function useMenuTabs() {
     tabMode,
     openTab,
     openBuiltinTab,
-    openAppTab,
-    appRealId,
     closeTab,
     activateTab,
     clearAll,

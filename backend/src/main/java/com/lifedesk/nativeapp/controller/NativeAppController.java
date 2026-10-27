@@ -3,6 +3,7 @@ package com.lifedesk.nativeapp.controller;
 import com.lifedesk.common.R;
 import com.lifedesk.nativeapp.entity.NativeApp;
 import com.lifedesk.nativeapp.service.NativeAppService;
+import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -19,10 +20,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 自定义本地应用 Controller。
+ * 常用App（自定义本地应用）Controller。
  *
- * <p>本地应用点击后由后端真实启动，窗口画面以截图流形式嵌入系统展示，
- * 交互在原生窗口进行（一键置前）。接口前缀 /api/native-app。</p>
+ * <p>点击应用由后端在本机真实启动（不嵌入窗口），展示图标与桌面快捷方式一致。
+ * 接口前缀 /api/native-app。</p>
  *
  * @author LifeDesk
  */
@@ -61,38 +62,18 @@ public class NativeAppController {
         return R.ok(null);
     }
 
-    /** 启动应用（已运行则置前） */
+    /** 启动应用（本机真实启动） */
     @PostMapping("/{id}/launch")
     public R<Map<String, Object>> launch(@PathVariable Long id) {
         return R.ok(nativeAppService.launch(id));
     }
 
-    /** 结束应用进程 */
-    @PostMapping("/{id}/stop")
-    public R<Void> stop(@PathVariable Long id) {
-        nativeAppService.stop(id);
-        return R.ok(null);
-    }
-
-    /** 应用窗口置前 */
-    @PostMapping("/{id}/focus")
-    public R<Void> focus(@PathVariable Long id) {
-        nativeAppService.focus(id);
-        return R.ok(null);
-    }
-
-    /** 全部应用运行状态 */
-    @GetMapping("/status")
-    public R<Map<Long, Map<String, Object>>> status() {
-        return R.ok(nativeAppService.status());
-    }
-
-    /** 应用窗口实时画面（PNG；前端定时轮询） */
-    @GetMapping(value = "/{id}/screenshot", produces = MediaType.IMAGE_PNG_VALUE)
-    public ResponseEntity<byte[]> screenshot(@PathVariable Long id) {
-        byte[] png = nativeAppService.screenshot(id);
+    /** 应用图标 PNG（与桌面快捷方式一致；失败时前端回退占位图标） */
+    @GetMapping(value = "/{id}/icon", produces = MediaType.IMAGE_PNG_VALUE)
+    public ResponseEntity<byte[]> icon(@PathVariable Long id) {
+        byte[] png = nativeAppService.icon(id);
         return ResponseEntity.ok()
-                .cacheControl(org.springframework.http.CacheControl.noStore())
+                .cacheControl(CacheControl.noCache())
                 .contentType(MediaType.IMAGE_PNG)
                 .body(png);
     }
