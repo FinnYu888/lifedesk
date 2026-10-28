@@ -31,6 +31,11 @@
         <VChart :option="perfOption" autoresize style="height: 220px" />
       </div>
     </div>
+
+    <!-- 外部监控源区域：RocketMQ（后续 Redis / MySQL / S3 等面板在此依次排列） -->
+    <div class="ext-monitor-section">
+      <RocketMqPanel />
+    </div>
   </div>
 </template>
 
@@ -42,6 +47,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
 import StatCard from "@/components/StatCard.vue";
+import RocketMqPanel from "./components/RocketMqPanel.vue";
 import { fetchMonitorOverview } from "@/api/monitor";
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
@@ -151,6 +157,7 @@ onMounted(load);
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  margin-bottom: 18px;
 }
 .card-title {
   font-size: 16px;

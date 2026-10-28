@@ -78,3 +78,12 @@ rpt:
     password: Finn@610810
     cds-version: "5"
     tenants: 29,30
+
+# 外部监控源（系统监控页）
+# RocketMQ Dashboard 抓取：登录后会话保持，聚合集群/主题/消费组指标，结果缓存 30s
+ext-monitor:
+  rocketmq:
+    dashboard-url: https://10.139.93.130:8079
+    username: cdsmqadmin
+    password: Cimc@2026
+    cache-ttl-seconds: 30
