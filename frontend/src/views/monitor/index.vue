@@ -7,16 +7,16 @@
     </div>
 
     <div class="dual-row">
-      <!-- 服务器状态列表 -->
+      <!-- 服务器状态列表（内置项 + RocketMQ/Redis 实时状态同步） -->
       <div class="ld-card">
         <div class="card-title">服务器状态</div>
-        <div v-for="s in servers" :key="s.id" class="server-row" :class="{ alert: s.status === 'alert' || s.status === 'checking' }">
+        <div v-for="(s, i) in serverList" :key="s.name + i" class="server-row" :class="{ alert: s.status === 'alert' || s.status === 'checking' }">
           <span class="server-dot" :class="serverDotCls(s.status)" />
           <div class="server-info">
             <div class="server-name">{{ s.name }}</div>
-            <div class="server-sub" :class="serverTextCls(s.status)">{{ statusLabel(s.status) }}</div>
+            <div class="server-sub" :class="serverTextCls(s.status)">{{ s.sub || statusLabel(s.status) }}</div>
           </div>
-          <div class="server-latency">{{ s.latency ? s.latency + (s.latencyUnit || 'ms') : '—' }}</div>
+          <div class="server-latency">{{ s.metric || '—' }}</div>
         </div>
       </div>
 
@@ -32,15 +32,16 @@
       </div>
     </div>
 
-    <!-- 外部监控源区域：RocketMQ（后续 Redis / MySQL / S3 等面板在此依次排列） -->
+    <!-- 外部监控源区域：RocketMQ / Redis（后续 MySQL / S3 等面板在此依次排列） -->
     <div class="ext-monitor-section">
-      <RocketMqPanel />
+      <RocketMqPanel @status="onExtStatus('rocketmq', $event)" />
+      <RedisPanel @status="onExtStatus('redis', $event)" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, reactive, onMounted } from "vue";
 import VChart from "vue-echarts";
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
@@ -48,6 +49,7 @@ import { LineChart } from "echarts/charts";
 import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
 import StatCard from "@/components/StatCard.vue";
 import RocketMqPanel from "./components/RocketMqPanel.vue";
+import RedisPanel from "./components/RedisPanel.vue";
 import { fetchMonitorOverview } from "@/api/monitor";
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
@@ -58,6 +60,39 @@ const stat = ref<any>({});
 const servers = ref<any[]>([]);
 const alerts = ref<any[]>([]);
 const perf = ref<any[]>([]);
+
+// ===== 外部监控源实时状态（面板加载后上报，同步进服务器状态列表） =====
+const extStatus = reactive<Record<string, { name: string; running: boolean; metric: string; sub: string }>>({});
+
+function onExtStatus(key: string, payload: { running: boolean; metric: string; sub: string }) {
+  extStatus[key] = {
+    name: key === "rocketmq" ? "消息队列 RocketMQ" : "Redis 缓存",
+    running: payload.running,
+    metric: payload.metric,
+    sub: payload.sub
+  };
+}
+
+/** 服务器状态列表：内置项（剔除 mock 的消息队列/Redis 行）+ 外部监控源实时行 */
+const serverList = computed<any[]>(() => {
+  const mockExclude = ["消息队列", "Redis 缓存"];
+  const builtin = servers.value
+    .filter((s: any) => !mockExclude.some(k => (s.name || "").includes(k)))
+    .map((s: any) => ({
+      name: s.name,
+      status: s.status,
+      metric: s.latency ? s.latency + (s.latencyUnit || "ms") : ""
+    }));
+  const live = ["rocketmq", "redis"]
+    .filter(k => extStatus[k])
+    .map(k => ({
+      name: extStatus[k].name,
+      status: extStatus[k].running ? "running" : "alert",
+      sub: extStatus[k].sub,
+      metric: extStatus[k].metric
+    }));
+  return [...builtin, ...live];
+});
 
 const perfOption = computed(() => {
   const x = perf.value.map(p => p.pointTime);

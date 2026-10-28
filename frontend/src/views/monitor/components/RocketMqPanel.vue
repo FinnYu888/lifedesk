@@ -144,6 +144,10 @@ import { fetchRocketMqOverview, refreshRocketMqOverview } from "@/api/extMonitor
 
 defineOptions({ name: "RocketMqPanel" });
 
+const emit = defineEmits<{
+  (e: "status", payload: { running: boolean; metric: string; sub: string }): void;
+}>();
+
 const data = ref<any>({});
 const loading = ref(false);
 const loaded = ref(false);
@@ -160,6 +164,23 @@ function pct(v: any): string {
   return Math.round((Number(v) || 0) * 1000) / 10 + "%";
 }
 
+/** 向父级（服务器状态列表）上报实时状态 */
+function reportStatus() {
+  const ok = loaded.value && healthy.value && !!data.value.cluster;
+  let metric = "—";
+  if (ok) {
+    const master = (data.value.brokers || []).find((b: any) => b.master) || data.value.brokers?.[0];
+    metric = master ? `${master.putTps} msg/s` : "—";
+  }
+  emit("status", {
+    running: ok,
+    metric,
+    sub: ok
+      ? `运行中 · ${c.value.brokerNodeCount} 节点 · ${num(c.value.todayPut)} 收今日`
+      : `异常 · ${data.value.errMsg || "Dashboard 不可达"}`
+  });
+}
+
 async function load(force = false) {
   loading.value = true;
   try {
@@ -170,6 +191,7 @@ async function load(force = false) {
     /* 拦截器已提示 */
   } finally {
     loading.value = false;
+    reportStatus();
   }
 }
 

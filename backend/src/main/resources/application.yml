@@ -87,3 +87,10 @@ ext-monitor:
     username: cdsmqadmin
     password: Cimc@2026
     cache-ttl-seconds: 30
+  redis:
+    host: 10.139.93.124
+    port: 6379
+    password: Cds@1234
+    # 只展示这些 database 的键空间指标
+    databases: "0,1"
+    cache-ttl-seconds: 30

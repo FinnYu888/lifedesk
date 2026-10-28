@@ -1,6 +1,7 @@
 package com.lifedesk.extmonitor;
 
 import com.lifedesk.common.R;
+import com.lifedesk.extmonitor.redis.RedisMonitorService;
 import com.lifedesk.extmonitor.rocketmq.RocketMqMonitorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,7 +15,7 @@ import java.util.Map;
  * 外部监控源 Controller。
  *
  * <p>统一挂载在 /ext-monitor 下，按数据源分接口：
- * 当前支持 RocketMQ（/rocketmq/overview），后续可扩展 Redis / MySQL / S3 等。
+ * 当前支持 RocketMQ（/rocketmq/*）与 Redis（/redis/*），后续可扩展 MySQL / S3 等。
  * 各源采集器位于 {@code extmonitor.*} 子包，互不影响。</p>
  *
  * @author LifeDesk
@@ -25,6 +26,7 @@ import java.util.Map;
 public class ExtMonitorController {
 
     private final RocketMqMonitorService rocketMqMonitorService;
+    private final RedisMonitorService redisMonitorService;
 
     /** RocketMQ 集群总览（缓存 30s） */
     @GetMapping("/rocketmq/overview")
@@ -36,5 +38,17 @@ public class ExtMonitorController {
     @PostMapping("/rocketmq/refresh")
     public R<Map<String, Object>> rocketMqRefresh() {
         return R.ok(rocketMqMonitorService.refresh());
+    }
+
+    /** Redis 指标总览（缓存 30s） */
+    @GetMapping("/redis/overview")
+    public R<Map<String, Object>> redisOverview() {
+        return R.ok(redisMonitorService.overview());
+    }
+
+    /** Redis 指标总览（强制刷新） */
+    @PostMapping("/redis/refresh")
+    public R<Map<String, Object>> redisRefresh() {
+        return R.ok(redisMonitorService.refresh());
     }
 }
