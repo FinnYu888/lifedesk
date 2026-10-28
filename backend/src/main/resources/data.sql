@@ -3,9 +3,9 @@
 -- SET NAMES utf8mb4 确保连接层字符集与表字符集一致，避免中文数据乱码
 SET NAMES utf8mb4;
 
--- 用户
+-- 用户（预置账号，登录名 俞鹏飞 / finn；历史库由 DatabaseMigration 保证归属 id=1）
 INSERT IGNORE INTO sys_user(id, nickname, avatar) VALUES
-(1, '林深', NULL);
+(1, '俞鹏飞', NULL);
 
 -- 项目（7 模块首页：项目管理 12；放 6 条活跃项目示例）
 INSERT IGNORE INTO project(id, name, tech, description, progress, last_active, status) VALUES

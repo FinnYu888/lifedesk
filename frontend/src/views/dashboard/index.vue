@@ -2,7 +2,7 @@
   <div class="dashboard">
     <div class="greeting ld-card">
       <div>
-        <div class="greeting-text">{{ greeting?.greeting || "你好，林深" }}</div>
+        <div class="greeting-text">{{ greeting?.greeting || `你好，${localNickname}` }}</div>
         <div class="greeting-sub">{{ greeting?.summary || "今日 3 场日程 · 1 个会议" }}</div>
       </div>
       <div class="text-positive">{{ greeting?.date }}</div>
@@ -257,6 +257,8 @@ defineOptions({ name: "DashboardView" });
 const router = useRouter();
 const greeting = ref<any>(null);
 const moduleStat = ref<any>(null);
+// 问候语加载前/失败时的本地兜底：展示当前登录账号昵称
+const localNickname = localStorage.getItem("lifedesk-user") || "用户";
 
 // 项目管理仪表盘数据
 const projStat = ref<any>(null);

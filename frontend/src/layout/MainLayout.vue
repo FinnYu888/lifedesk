@@ -82,8 +82,8 @@
       </div>
 
       <div class="user-area">
-        <div class="avatar">林</div>
-        <span class="nickname">林深</span>
+        <div class="avatar">{{ nickname.slice(0, 1) }}</div>
+        <span class="nickname">{{ nickname }}</span>
       </div>
     </aside>
 

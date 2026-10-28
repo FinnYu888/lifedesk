@@ -1,5 +1,6 @@
 package com.lifedesk.dashboard.service;
 
+import com.lifedesk.auth.UserContext;
 import com.lifedesk.english.service.EnglishTaskService;
 import com.lifedesk.favorite.service.FavoriteService;
 import com.lifedesk.health.service.HealthService;
@@ -9,6 +10,7 @@ import com.lifedesk.schedule.service.ScheduleService;
 import com.lifedesk.skill.service.SkillService;
 import com.lifedesk.task.service.TaskService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -37,6 +39,7 @@ public class DashboardService {
     private final HealthService healthService;
     private final FavoriteService favoriteService;
     private final EnglishTaskService englishTaskService;
+    private final JdbcTemplate jdbcTemplate;
 
     /** 问候区 + 今日摘要 */
     public Map<String, Object> greeting() {
@@ -55,7 +58,19 @@ public class DashboardService {
         } else {
             prefix = "夜深了";
         }
-        String greeting = prefix + "，林深";
+        // 昵称按当前登录账号查询（各用户看到自己的名字）
+        String nickname = null;
+        try {
+            nickname = jdbcTemplate.queryForObject(
+                    "SELECT nickname FROM sys_user WHERE id = ? AND deleted = 0",
+                    String.class, UserContext.getOrDefault());
+        } catch (Exception ignore) {
+            // 查不到时用通用称呼
+        }
+        if (nickname == null || nickname.trim().isEmpty()) {
+            nickname = "用户";
+        }
+        String greeting = prefix + "，" + nickname;
 
         String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("M月d日", Locale.CHINA));
         String weekStr = LocalDate.now().getDayOfWeek().getDisplayName(java.time.format.TextStyle.SHORT, Locale.CHINA);
