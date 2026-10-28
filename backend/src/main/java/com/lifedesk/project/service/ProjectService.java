@@ -251,6 +251,20 @@ public class ProjectService {
         return existed;
     }
 
+    /**
+     * 拉取指定项目已配置仓库的分支列表（编辑页「使用分支」下拉数据源）。
+     * <p>使用项目已保存的地址/账密（编辑弹窗密码留空表示不修改，此处用库里的真实凭据）。</p>
+     */
+    public List<String> listProjectBranches(Long id) {
+        Project project = projectMapper.selectById(id);
+        if (project == null) {
+            throw new BizException("项目不存在或已被删除");
+        }
+        return gitSyncService.listBranches(
+                project.getGitPlatform(), project.getGitUrl(),
+                project.getGitUsername(), project.getGitPassword());
+    }
+
     private boolean isFieldChanged(String old, String inc) {
         if (inc == null) return false;
         String o = old == null ? "" : old;

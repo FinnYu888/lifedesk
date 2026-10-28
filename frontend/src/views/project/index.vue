@@ -460,7 +460,41 @@
           />
         </el-form-item>
         <el-form-item label="使用分支">
-          <el-input v-model="form.gitBranch" placeholder="main / master / develop" />
+          <div class="branch-row">
+            <!-- 下拉选择远程分支（可输入过滤），同时保留直接手输：allow-create -->
+            <el-select
+              v-model="form.gitBranch"
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              :loading="branchLoading"
+              :placeholder="form.gitUrl ? '输入关键字过滤或直接输入分支名' : 'main / master / develop（填写 Git 地址后可下拉选择）'"
+              class="branch-select"
+            >
+              <el-option
+                v-for="b in branchOptions"
+                :key="b"
+                :label="b"
+                :value="b"
+              />
+              <template #empty>
+                <div class="branch-empty" @click="loadBranchOptions">
+                  <el-icon v-if="branchLoading" class="is-loading"><Loading /></el-icon>
+                  <span>{{ branchLoading ? '正在拉取分支…' : form.gitUrl ? '暂无分支数据，点击拉取' : '请先填写 Git 地址' }}</span>
+                </div>
+              </template>
+            </el-select>
+            <el-tooltip content="按当前填写的 Git 地址/账密重新拉取分支列表" placement="top">
+              <el-button
+                class="branch-refresh"
+                :icon="Refresh"
+                :loading="branchLoading"
+                circle
+                @click="loadBranchOptions"
+              />
+            </el-tooltip>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -585,7 +619,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import RingChart from "@/components/RingChart.vue";
 import ProgressBar from "@/components/ProgressBar.vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Edit, Refresh, Delete } from "@element-plus/icons-vue";
+import { Plus, Edit, Refresh, Delete, Loading } from "@element-plus/icons-vue";
 import {
   fetchProjectStat,
   fetchProjectActive,
@@ -593,7 +627,9 @@ import {
   createProject,
   updateProject,
   deleteProject,
-  syncProject
+  syncProject,
+  fetchProjectBranches,
+  probeProjectBranches
 } from "@/api/project";
 import {
   fetchRequirements,
@@ -948,6 +984,7 @@ function resetForm() {
     gitBranch: "main",
     gitPlatform: "generic"
   };
+  branchOptions.value = [];
 }
 
 function openCreateDialog() {
@@ -969,6 +1006,53 @@ function openEditDialog(p: any) {
     gitPlatform: p.gitPlatform || "generic"
   };
   dialogVisible.value = true;
+  savedGitUrl.value = form.value.gitUrl;
+  // 已配置 Git 地址：用项目已保存的地址/账密拉取分支供下拉选择
+  if (form.value.gitUrl) {
+    loadBranchOptions();
+  }
+}
+
+// ===================== 「使用分支」下拉数据源 =====================
+const branchOptions = ref<string[]>([]);
+const branchLoading = ref(false);
+/** 打开编辑弹窗时记录的已保存 Git 地址：判断用库里凭据还是表单临时凭据拉分支 */
+const savedGitUrl = ref("");
+
+/**
+ * 拉取远程分支列表：
+ * - 编辑模式且地址未改动：走 GET /project/{id}/branches，用项目已保存的地址/账密（密码留空不修改场景）；
+ * - 地址已改动或新建模式：走 POST /project/branches，用表单里当前输入的地址/账密。
+ * 失败静默（下拉空态提供"点击拉取"重试），手输分支始终可用（allow-create）。
+ */
+async function loadBranchOptions() {
+  if (!form.value.gitUrl || !form.value.gitUrl.trim()) {
+    branchOptions.value = [];
+    return;
+  }
+  branchLoading.value = true;
+  try {
+    // 编辑模式：地址与库里一致才能用已保存凭据（GET）；否则用表单当前输入探测（POST）
+    const useSaved = !!form.value.id && form.value.gitUrl.trim() === savedGitUrl.value.trim();
+    const r: any = useSaved
+      ? await fetchProjectBranches(form.value.id)
+      : await probeProjectBranches({
+          gitPlatform: form.value.gitPlatform,
+          gitUrl: form.value.gitUrl,
+          gitUsername: form.value.gitUsername,
+          gitPassword: form.value.gitPassword
+        });
+    let list: string[] = r?.data || [];
+    // 确保当前选中分支在选项里（避免显示成裸值）
+    if (form.value.gitBranch && !list.includes(form.value.gitBranch)) {
+      list = [form.value.gitBranch, ...list];
+    }
+    branchOptions.value = list;
+  } catch {
+    branchOptions.value = [];
+  } finally {
+    branchLoading.value = false;
+  }
 }
 
 async function submitForm() {
@@ -2019,6 +2103,33 @@ html[data-theme="cream"] .ov-metric.rose   .ov-value { color: #c94f7c; }
   background: rgba(44, 212, 191, 0.12);
   color: #2dd4bf;
   border-radius: 8px;
+}
+/* 「使用分支」下拉行：选择器 + 刷新按钮 */
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.branch-select {
+  flex: 1;
+  min-width: 0; /* 一屏自适应：允许收缩 */
+}
+.branch-refresh {
+  flex-shrink: 0;
+}
+.branch-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 0;
+  font-size: 12px;
+  color: $text-tertiary;
+  cursor: pointer;
+  &:hover {
+    color: $accent-light;
+  }
 }
 .proj-desc {
   font-size: 12px;

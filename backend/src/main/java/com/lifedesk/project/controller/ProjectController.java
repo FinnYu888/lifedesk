@@ -36,6 +36,7 @@ public class ProjectController {
 
     private final ProjectService projectService;
     private final RequirementService requirementService;
+    private final GitSyncService gitSyncService;
 
     /** 统计卡行 */
     @GetMapping("/stat")
@@ -163,6 +164,30 @@ public class ProjectController {
     @PostMapping("/{id}/sync")
     public R<GitSyncService.SyncResult> sync(@PathVariable Long id) {
         return R.ok(projectService.syncProject(id));
+    }
+
+    /**
+     * 拉取指定项目已配置仓库的分支列表（编辑页「使用分支」下拉数据源）。
+     * <p>使用项目已保存的地址/账密；编辑弹窗密码留空表示不修改，这里直接读库里的真实凭据。</p>
+     * <p>失败抛 BizException/IllegalArgumentException（message 为友好提示，由全局异常处理返回）。</p>
+     */
+    @GetMapping("/{id}/branches")
+    public R<List<String>> branches(@PathVariable Long id) {
+        return R.ok(projectService.listProjectBranches(id));
+    }
+
+    /**
+     * 用表单临时输入的地址/账密拉取分支列表（新建项目时「使用分支」下拉数据源）。
+     * <p>请求体：{@code {"gitPlatform":"generic|github|gitlab","gitUrl":"...","gitUsername":"...","gitPassword":"..."}}</p>
+     */
+    @PostMapping("/branches")
+    public R<List<String>> branchesPreview(@RequestBody Map<String, String> body) {
+        if (body == null) {
+            return R.ok(java.util.Collections.emptyList());
+        }
+        return R.ok(gitSyncService.listBranches(
+                body.get("gitPlatform"), body.get("gitUrl"),
+                body.get("gitUsername"), body.get("gitPassword")));
     }
 
     /** 列出项目下的合并请求 */

@@ -446,6 +446,109 @@ public class GitSyncService {
         return result;
     }
 
+    // ===================== 分支列表（编辑页「使用分支」下拉数据源） =====================
+
+    /**
+     * 拉取远程仓库的全部分支（按仓库类型走对应通道）。
+     *
+     * <ul>
+     *   <li>github：REST {@code /repos/{owner}/{repo}/branches}，鉴权 Bearer token</li>
+     *   <li>gitlab：REST {@code /api/v4/projects/{id}/repository/branches}，鉴权 PRIVATE-TOKEN</li>
+     *   <li>generic：JGit lsRemote（仅 refs/heads/*），账密可选</li>
+     * </ul>
+     *
+     * @param platform 仓库类型 github / gitlab / generic
+     * @param gitUrl   仓库地址
+     * @param username 鉴权用户名（generic 用；github/gitlab 忽略）
+     * @param password 密码或 Access Token（github 用作 Bearer，gitlab 用作 PRIVATE-TOKEN，generic 用作密码）
+     * @return 分支名列表（字母序），失败抛 IllegalArgumentException（message 为友好提示）
+     */
+    public List<String> listBranches(String platform, String gitUrl, String username, String password) {
+        if (gitUrl == null || gitUrl.trim().isEmpty()) {
+            throw new IllegalArgumentException("Git 地址为空，请先填写仓库地址");
+        }
+        String p = platform == null ? "generic" : platform.trim().toLowerCase();
+        try {
+            List<String> branches;
+            switch (p) {
+                case "github":
+                    branches = listBranchesGitHub(gitUrl, password);
+                    break;
+                case "gitlab":
+                    branches = listBranchesGitLab(gitUrl, password);
+                    break;
+                default:
+                    branches = listBranchesJGit(gitUrl, username, password);
+                    break;
+            }
+            branches.sort(String.CASE_INSENSITIVE_ORDER);
+            return branches;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("[GitSync] 拉取分支失败：url={} 类型={} 错误={}", gitUrl, p, e.getMessage());
+            throw new IllegalArgumentException(friendlyError(e));
+        }
+    }
+
+    private List<String> listBranchesGitHub(String gitUrl, String token) throws Exception {
+        String[] ownerRepo = parseOwnerRepo(gitUrl);
+        if (ownerRepo == null) {
+            throw new IllegalArgumentException("GitHub 地址解析失败，应为 https://github.com/{owner}/{repo}.git");
+        }
+        Map<String, String> headers = new java.util.HashMap<>();
+        headers.put("Accept", "application/vnd.github+json");
+        if (token != null && !token.isEmpty()) {
+            headers.put("Authorization", "Bearer " + token);
+        }
+        JsonNode root = httpGetJson("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]
+                + "/branches?per_page=100", headers);
+        List<String> result = new ArrayList<>();
+        for (JsonNode n : root) {
+            String name = textOr(n, "name");
+            if (name != null) result.add(name);
+        }
+        return result;
+    }
+
+    private List<String> listBranchesGitLab(String gitUrl, String token) throws Exception {
+        String[] hostPath = parseGitLabUrl(gitUrl);
+        if (hostPath == null) {
+            throw new IllegalArgumentException("GitLab 地址解析失败，应为 http(s)://{host}/{group}/{project}.git");
+        }
+        Map<String, String> headers = new java.util.HashMap<>();
+        if (token != null && !token.isEmpty()) {
+            headers.put("PRIVATE-TOKEN", token);
+        }
+        headers.put("Accept", "application/json");
+        JsonNode root = httpGetJson(hostPath[0] + "/api/v4/projects/" + urlEncode(hostPath[1])
+                + "/repository/branches?per_page=100", headers);
+        List<String> result = new ArrayList<>();
+        for (JsonNode n : root) {
+            String name = textOr(n, "name");
+            if (name != null) result.add(name);
+        }
+        return result;
+    }
+
+    private List<String> listBranchesJGit(String gitUrl, String username, String password) throws Exception {
+        org.eclipse.jgit.api.LsRemoteCommand cmd = Git.lsRemoteRepository()
+                .setRemote(gitUrl.trim())
+                .setHeads(true)          // 仅取 refs/heads/*（本地分支）
+                .setTags(false);
+        if (username != null && !username.trim().isEmpty() && password != null && !password.isEmpty()) {
+            cmd.setCredentialsProvider(new UsernamePasswordCredentialsProvider(username, password));
+        }
+        List<String> result = new ArrayList<>();
+        for (Ref ref : cmd.call()) {
+            String name = ref.getName();
+            if (name.startsWith("refs/heads/")) {
+                result.add(name.substring("refs/heads/".length()));
+            }
+        }
+        return result;
+    }
+
     // ===================== 共用辅助 =====================
 
     /** 持久化：清空旧数据 → 插入新数据 → 更新 project 统计字段 */
