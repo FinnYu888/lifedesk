@@ -96,6 +96,18 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
+        <!-- 全局音乐迷你展示：播放时出现，均衡器动态 + 歌名 + 播放/暂停；
+             播放器为全局单例，切菜单不中断 -->
+        <div v-if="player.current" class="mini-player" :title="player.playing ? '点击暂停' : '点击播放'">
+          <span class="np-eq" :class="{ paused: !player.playing }" @click="player.toggle()">
+            <i /><i /><i /><i />
+          </span>
+          <span class="np-title" @click="player.toggle()">{{ player.current.title }}</span>
+          <el-icon class="np-btn" :size="16" @click="player.toggle()">
+            <VideoPause v-if="player.playing" />
+            <VideoPlay v-else />
+          </el-icon>
+        </div>
         <!-- 主题切换：深紫玻璃(glass) → 科技HUD(tech) → 奶白暖调(cream) 循环，选择持久化 localStorage -->
         <button
           class="theme-toggle"
@@ -310,12 +322,16 @@ import {
   TopRight,
   Loading,
   MilkTea,
-  Moon
+  Moon,
+  Headset,
+  VideoPlay,
+  VideoPause
 } from "@element-plus/icons-vue";
 import { useCustomMenus } from "@/composables/useCustomMenus";
 import { useMenuTabs } from "@/composables/useMenuTabs";
 import { useTheme } from "@/composables/useTheme";
 import { useAlerts, startAlertPolling } from "@/composables/useAlerts";
+import { usePlayer } from "@/composables/usePlayer";
 import type { CustomMenu } from "@/api/customMenu";
 
 defineOptions({ name: "MainLayout" });
@@ -327,6 +343,8 @@ const { theme, toggleTheme, THEME_LABEL } = useTheme();
 
 // ===== 告警闹铃（全局单例轮询，共享给系统监控页） =====
 const { alerts, alertCount, sourceLabel, levelLabel } = useAlerts();
+// 全局音乐播放器（单例）：右上角迷你展示当前播放曲目，切菜单不中断
+const player = usePlayer();
 const bellOpen = ref(false);
 
 const pageTitle = computed(() => {
@@ -346,7 +364,8 @@ const DOOMSDAY_BG: Record<string, string> = {
   "/bookmark": "/theme/doomsday/bg-07.jpg",
   "/english": "/theme/doomsday/bg-08.jpg",
   "/health": "/theme/doomsday/bg-09.jpg",
-  "/apps": "/theme/doomsday/bg-10.jpg"
+  "/apps": "/theme/doomsday/bg-10.jpg",
+  "/music": "/theme/doomsday/bg-11.png"
 };
 const doomsdayBg = computed(() => DOOMSDAY_BG[route.path] || "");
 
@@ -360,7 +379,8 @@ const navItems = [
   { path: "/bookmark", label: "收藏与笔记", icon: Collection },
   { path: "/english", label: "英语提升", icon: Reading },
   { path: "/health", label: "个人健康", icon: Sunny },
-  { path: "/apps", label: "常用App", icon: Cpu }
+  { path: "/apps", label: "常用App", icon: Cpu },
+  { path: "/music", label: "我的音乐", icon: Headset }
 ];
 
 // ===== 侧栏菜单拖拽排序（内置 + 自定义统一持久化到 localStorage） =====
@@ -944,6 +964,57 @@ onMounted(() => {
   margin-top: 4px;
   font-size: 11px;
   color: $text-tertiary;
+}
+
+// 全局音乐迷你展示（主题切换按钮左侧）：均衡器 + 歌名 + 播放/暂停
+.mini-player {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  padding: 5px 12px;
+  border-radius: 18px;
+  background: rgba(124, 92, 255, 0.14);
+  border: 1px solid $border-accent;
+  cursor: pointer;
+}
+.np-eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 13px;
+  flex-shrink: 0;
+  i {
+    display: inline-block;
+    width: 3px;
+    background: $accent-light;
+    border-radius: 1px;
+    animation: np-eq-bounce 0.9s ease-in-out infinite;
+    &:nth-child(1) { height: 6px; animation-delay: 0s; }
+    &:nth-child(2) { height: 12px; animation-delay: 0.2s; }
+    &:nth-child(3) { height: 8px; animation-delay: 0.4s; }
+    &:nth-child(4) { height: 13px; animation-delay: 0.6s; }
+  }
+  &.paused i {
+    animation-play-state: paused;
+    opacity: 0.45;
+  }
+}
+.np-title {
+  font-size: 12px;
+  color: $text-primary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 130px;
+}
+.np-btn {
+  flex-shrink: 0;
+  color: $accent-light;
+}
+@keyframes np-eq-bounce {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
 }
 
 // 主题切换按钮：跟随主题变量自动换肤

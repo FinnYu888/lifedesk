@@ -423,3 +423,18 @@ CREATE TABLE IF NOT EXISTS native_app (
 -- CREATE TABLE IF NOT EXISTS 不会更新已存在的表，新增字段由 DatabaseMigration Runner
 -- 在启动后用 JDBC 检查 INFORMATION_SCHEMA 并 ALTER TABLE ADD COLUMN（精确无副作用）。
 -- 这里不写 ALTER TABLE ADD COLUMN IF NOT EXISTS，因为 MySQL 8 不支持该语法（仅 MariaDB 支持）。
+-- ========== 我的音乐（链接或上传源文件，全局播放不随菜单切换停止） ==========
+CREATE TABLE IF NOT EXISTS music_track (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(256) NOT NULL COMMENT '歌曲名',
+    artist VARCHAR(128) DEFAULT NULL COMMENT '歌手',
+    source_type VARCHAR(16) NOT NULL DEFAULT 'link' COMMENT '来源：link=外链 / upload=上传源文件',
+    url VARCHAR(2000) DEFAULT NULL COMMENT '外链地址（source_type=link 时有效）',
+    file_path VARCHAR(512) DEFAULT NULL COMMENT '上传文件相对路径（source_type=upload 时有效）',
+    file_size BIGINT DEFAULT NULL COMMENT '文件大小（字节，上传时记录）',
+    duration_sec INT DEFAULT NULL COMMENT '时长（秒，可选，由前端播放器回填）',
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_deleted(deleted)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='我的音乐';

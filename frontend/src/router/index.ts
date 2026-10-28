@@ -22,7 +22,7 @@ const routes: RouteRecordRaw[] = [
         path: "task",
         name: "Task",
         component: () => import("@/views/task/index.vue"),
-        meta: { title: "每日速览" }
+        meta: { title: "任务工单" }
       },
       {
         path: "schedule",
@@ -66,6 +66,13 @@ const routes: RouteRecordRaw[] = [
         name: "Apps",
         component: () => import("@/views/apps/index.vue"),
         meta: { title: "常用App" }
+      },
+      {
+        // 我的音乐：外链/上传源文件，全局播放器播放不随菜单切换停止
+        path: "music",
+        name: "Music",
+        component: () => import("@/views/music/index.vue"),
+        meta: { title: "我的音乐" }
       },
       {
         // 自定义菜单嵌入页：通过 iframe 把目标网站嵌入当前系统展示
