@@ -32,10 +32,12 @@
       </div>
     </div>
 
-    <!-- 外部监控源区域：RocketMQ / Redis（后续 MySQL / S3 等面板在此依次排列） -->
+    <!-- 外部监控源区域：RocketMQ / Redis / MySQL / OSS（后续新增数据源面板在此依次排列） -->
     <div class="ext-monitor-section">
       <RocketMqPanel @status="onExtStatus('rocketmq', $event)" />
       <RedisPanel @status="onExtStatus('redis', $event)" />
+      <MysqlPanel @status="onExtStatus('mysql', $event)" />
+      <OssPanel @status="onExtStatus('oss', $event)" />
     </div>
   </div>
 </template>
@@ -50,6 +52,8 @@ import { GridComponent, TooltipComponent, LegendComponent } from "echarts/compon
 import StatCard from "@/components/StatCard.vue";
 import RocketMqPanel from "./components/RocketMqPanel.vue";
 import RedisPanel from "./components/RedisPanel.vue";
+import MysqlPanel from "./components/MysqlPanel.vue";
+import OssPanel from "./components/OssPanel.vue";
 import { fetchMonitorOverview } from "@/api/monitor";
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent]);
@@ -65,17 +69,18 @@ const perf = ref<any[]>([]);
 const extStatus = reactive<Record<string, { name: string; running: boolean; metric: string; sub: string }>>({});
 
 function onExtStatus(key: string, payload: { running: boolean; metric: string; sub: string }) {
-  extStatus[key] = {
-    name: key === "rocketmq" ? "消息队列 RocketMQ" : "Redis 缓存",
-    running: payload.running,
-    metric: payload.metric,
-    sub: payload.sub
+  const names: Record<string, string> = {
+    rocketmq: "消息队列 RocketMQ",
+    redis: "Redis 缓存",
+    mysql: "MySQL 数据库",
+    oss: "文件存储 OSS"
   };
+  extStatus[key] = { name: names[key] || key, running: payload.running, metric: payload.metric, sub: payload.sub };
 }
 
-/** 服务器状态列表：内置项（剔除 mock 的消息队列/Redis 行）+ 外部监控源实时行 */
+/** 服务器状态列表：内置项（剔除 mock 的监控类行）+ 外部监控源实时行 */
 const serverList = computed<any[]>(() => {
-  const mockExclude = ["消息队列", "Redis 缓存"];
+  const mockExclude = ["消息队列", "Redis 缓存", "数据库", "文件存储"];
   const builtin = servers.value
     .filter((s: any) => !mockExclude.some(k => (s.name || "").includes(k)))
     .map((s: any) => ({
@@ -83,7 +88,7 @@ const serverList = computed<any[]>(() => {
       status: s.status,
       metric: s.latency ? s.latency + (s.latencyUnit || "ms") : ""
     }));
-  const live = ["rocketmq", "redis"]
+  const live = ["rocketmq", "redis", "mysql", "oss"]
     .filter(k => extStatus[k])
     .map(k => ({
       name: extStatus[k].name,

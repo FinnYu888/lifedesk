@@ -94,3 +94,18 @@ ext-monitor:
     # 只展示这些 database 的键空间指标
     databases: "0,1"
     cache-ttl-seconds: 30
+  mysql:
+    host: 10.139.93.124
+    port: 3306
+    username: devuser
+    password: NcS5DasnIf8DiSIVnGlf
+    # 监控的库列表，逐库测连通并统计数据大小
+    databases: cdsdb_cts,cdsdb_fee,cdsdb_edi,cdsdb_basic,cdsdb_ua,cdsdb_dbh
+    cache-ttl-seconds: 30
+  oss:
+    endpoint: https://oss-tianjin.sangforcloud.com:12000
+    access-key: LDD7VWGO9E4NMSRB5PD8
+    secret-key: WX2IO54hB8YqfgFnv8tZMKuxWpMkZU1LcM5z9HEC
+    # 监控的桶列表；对象量大时全量统计需数分钟，采用后台异步统计 + 长缓存
+    buckets: wlprdytcdsbucket01,wlprdskcdsbucket01
+    cache-ttl-seconds: 3600
