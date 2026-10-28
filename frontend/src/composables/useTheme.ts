@@ -7,22 +7,24 @@ import { ref, watch } from "vue";
  *   glass（默认）→ 深紫液态玻璃
  *   tech         → 科技 HUD 风（深蓝底 + 青色霓虹）
  *   cream        → 奶白色（暖调浅色：奶白底 + 焦糖主色）
+ *   doomsday     → 末日科幻（各菜单页面配专属实景背景图 + 暗色蒙版保证数据可读）
  *
  * 选择持久化到 localStorage（key: lifedesk-theme），刷新后恢复。
  */
 
-export type ThemeName = "glass" | "tech" | "cream";
+export type ThemeName = "glass" | "tech" | "cream" | "doomsday";
 
 const THEME_KEY = "lifedesk-theme";
 
 /** 主题循环顺序：点击切换按钮依次轮换 */
-const THEME_CYCLE: ThemeName[] = ["glass", "tech", "cream"];
+const THEME_CYCLE: ThemeName[] = ["glass", "tech", "cream", "doomsday"];
 
 /** 主题展示名（按钮文字用） */
 export const THEME_LABEL: Record<ThemeName, string> = {
   glass: "液态玻璃",
   tech: "科技 HUD",
-  cream: "奶白暖调"
+  cream: "奶白暖调",
+  doomsday: "末日科幻"
 };
 
 function loadInitial(): ThemeName {

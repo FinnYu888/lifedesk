@@ -9,7 +9,7 @@
         <el-tag v-else size="small" type="danger" effect="plain">异常</el-tag>
       </div>
       <div class="oss-actions">
-        <span class="oss-fetched">{{ addr }} · {{ data.fetchedAt ? '统计于 ' + data.fetchedAt : '首次统计约需数分钟' }}</span>
+        <span class="oss-fetched">{{ addr }} · {{ data.fetchedAt ? "统计于 " + data.fetchedAt : "首次统计约需数分钟" }}</span>
         <button class="ld-btn ld-btn-ghost sm" :disabled="loading" title="触发后台重新统计" @click="load(true)">
           <el-icon><Refresh /></el-icon>
         </button>
@@ -18,34 +18,54 @@
 
     <div v-if="loaded && !healthy && !data.collecting" class="oss-error">
       <el-icon :size="18"><WarningFilled /></el-icon>
-      <span>{{ data.errMsg || '无法连接对象存储端点' }}</span>
+      <span>{{ data.errMsg || "无法连接对象存储端点" }}</span>
     </div>
 
     <!-- 总览指标 -->
     <div class="oss-metrics">
       <div class="oss-metric">
-        <span class="mm-value">{{ data.bucketOk ?? '—' }}<i>/{{ data.bucketTotal ?? '—' }}</i></span>
+        <span class="mm-value">{{ data.bucketOk ?? "—" }}<i>/{{ data.bucketTotal ?? "—" }}</i></span>
         <span class="mm-label">可访问桶/监控桶</span>
       </div>
       <div class="oss-metric">
-        <span class="mm-value">{{ data.collecting ? '…' : num(data.totalObjects) }}</span>
+        <span class="mm-value">{{ data.collecting ? "…" : num(data.totalObjects) }}</span>
         <span class="mm-label">对象总数</span>
       </div>
       <div class="oss-metric">
-        <span class="mm-value">{{ data.collecting ? '…' : size(data.totalSizeBytes) }}</span>
+        <span class="mm-value">{{ data.collecting ? "…" : size(data.totalSizeBytes) }}</span>
         <span class="mm-label">存储总容量</span>
       </div>
       <div class="oss-metric">
-        <span class="mm-value">{{ data.collecting ? '…' : avgObj }}</span>
+        <span class="mm-value">{{ data.collecting ? "…" : avgObj }}</span>
         <span class="mm-label">平均对象大小</span>
       </div>
       <div class="oss-metric">
-        <span class="mm-value">{{ maxBucket ? maxBucket.sizeHuman : '…' }}</span>
-        <span class="mm-label">最大桶 · {{ maxBucket ? maxBucket.name : '—' }}</span>
+        <span class="mm-value">{{ maxBucket ? maxBucket.sizeHuman : "…" }}</span>
+        <span class="mm-label">最大桶 · {{ maxBucket ? maxBucket.name : "—" }}</span>
       </div>
       <div class="oss-metric">
-        <span class="mm-value">{{ avgLatency ? avgLatency + 'ms' : '…' }}</span>
+        <span class="mm-value">{{ avgLatency ? avgLatency + "ms" : "…" }}</span>
         <span class="mm-label">平均响应延迟</span>
+      </div>
+    </div>
+
+    <!-- 图表 + 关键事件 -->
+    <div class="oss-insight">
+      <div class="oss-chart-box">
+        <div class="oss-sub-title">各桶存储容量占比</div>
+        <VChart v-if="pieOption" :option="pieOption" autoresize style="height: 220px" />
+        <div v-else class="chart-empty">{{ data.collecting ? "统计中…" : "无桶数据" }}</div>
+      </div>
+      <div class="oss-events-box">
+        <div class="oss-sub-title">
+          关键事件
+          <span class="ev-count" :class="{ 'has': events.length }">{{ events.length }}</span>
+        </div>
+        <div v-if="!events.length" class="ev-empty">近期无异常事件 🎉</div>
+        <div v-for="(e, i) in events" :key="i" class="ev-item" :class="'lv-' + e.level">
+          <span class="ev-dot" />
+          <span class="ev-text">{{ e.text }}</span>
+        </div>
       </div>
     </div>
 
@@ -66,14 +86,14 @@
           <td class="strong">{{ b.name }}</td>
           <td>
             <template v-if="b.ok"><span class="b-dot dot-positive" /> 正常</template>
-            <template v-else><span class="b-dot dot-danger" /> {{ b.errMsg || '不可访问' }}</template>
+            <template v-else><span class="b-dot dot-danger" /> {{ b.errMsg || "不可访问" }}</template>
           </td>
-          <td>{{ b.ok ? (b.objects != null ? num(b.objects) : '统计中…') : '—' }}</td>
-          <td>{{ b.ok ? (b.sizeBytes != null ? size(b.sizeBytes) : '统计中…') : '—' }}</td>
-          <td>{{ b.ok ? b.latencyMs + 'ms' : '—' }}</td>
+          <td>{{ b.ok ? (b.objects != null ? num(b.objects) : "统计中…") : "—" }}</td>
+          <td>{{ b.ok ? (b.sizeBytes != null ? size(b.sizeBytes) : "统计中…") : "—" }}</td>
+          <td>{{ b.ok ? b.latencyMs + "ms" : "—" }}</td>
         </tr>
         <tr v-if="!data.buckets?.length">
-          <td colspan="5" class="empty">暂无数据{{ data.collecting ? '，对象规模较大，全量统计约需数分钟' : '' }}</td>
+          <td colspan="5" class="empty">暂无数据{{ data.collecting ? "，对象规模较大，全量统计约需数分钟" : "" }}</td>
         </tr>
       </tbody>
     </table>
@@ -83,7 +103,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { Refresh, WarningFilled } from "@element-plus/icons-vue";
+import VChart from "vue-echarts";
+import { use } from "echarts/core";
+import { CanvasRenderer } from "echarts/renderers";
+import { PieChart } from "echarts/charts";
+import { TooltipComponent, LegendComponent } from "echarts/components";
 import { fetchOssOverview, refreshOssOverview } from "@/api/extMonitor";
+
+use([CanvasRenderer, PieChart, TooltipComponent, LegendComponent]);
 
 const props = defineProps<{ addr?: string }>();
 
@@ -131,6 +158,45 @@ function size(bytes: any): string {
   return b + " B";
 }
 
+/** 各桶存储占比饼图 */
+const pieOption = computed(() => {
+  const list = (data.value.buckets || []).filter((b: any) => b.ok && b.sizeBytes != null && Number(b.sizeBytes) > 0);
+  if (!list.length) return null;
+  return {
+    tooltip: { trigger: "item", formatter: (p: any) => `${p.name}<br/>${size(p.value)} (${p.percent}%)` },
+    legend: { bottom: 0, textStyle: { color: "#a8a0c8", fontSize: 11 } },
+    series: [
+      {
+        type: "pie",
+        radius: ["42%", "68%"],
+        center: ["50%", "44%"],
+        avoidLabelOverlap: true,
+        itemStyle: { borderColor: "rgba(0,0,0,0.2)", borderWidth: 2 },
+        label: { color: "#c9c3e6", fontSize: 11, formatter: "{b}\n{d}%" },
+        data: list.map((b: any, i: number) => ({
+          name: b.name,
+          value: Number(b.sizeBytes) || 0,
+          itemStyle: { color: ["#2dd4bf", "#a78bfa", "#fbbf24", "#f472b6", "#60a5fa"][i % 5] }
+        }))
+      }
+    ]
+  };
+});
+
+/** 关键事件 */
+const events = computed(() => {
+  const list: { level: "critical" | "warning"; text: string }[] = [];
+  (data.value.buckets || []).forEach((b: any) => {
+    if (!b.ok) {
+      list.push({ level: "critical", text: `桶 ${b.name} 不可访问${b.errMsg ? "（" + b.errMsg + "）" : ""}` });
+    }
+  });
+  if (data.value.collecting) {
+    list.push({ level: "warning", text: "全量对象统计进行中（规模较大，约数分钟）" });
+  }
+  return list;
+});
+
 function reportStatus() {
   const okB = data.value.bucketOk ?? 0;
   const total = data.value.bucketTotal ?? 0;
@@ -139,7 +205,7 @@ function reportStatus() {
     running,
     metric: data.value.collecting ? "统计中" : size(data.value.totalSizeBytes),
     sub: data.value.collecting
-      ? `统计中 · 全量对象扫描进行中（约数分钟）`
+      ? "统计中 · 全量对象扫描进行中（约数分钟）"
       : running
         ? `运行中 · ${okB}/${total} 桶 · ${num(data.value.totalObjects)} 对象`
         : `异常 · ${okB}/${total} 桶可访问`
@@ -221,9 +287,12 @@ onUnmounted(() => {
 }
 .oss-metrics {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); /* 自适应换列，窄屏不溢出 */
   gap: 10px;
   margin-bottom: 16px;
+}
+.oss-metrics > * {
+  min-width: 0;
 }
 .oss-metric {
   display: flex;
@@ -254,12 +323,74 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.oss-insight {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px; /* 图表列可收缩，防 ECharts 撑破 */
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.oss-insight > * {
+  min-width: 0;
+}
+.oss-chart-box,
+.oss-events-box {
+  border: 1px solid $border-subtle;
+  border-radius: $radius-sm;
+  padding: 12px;
+}
 .oss-sub-title {
   font-size: 13px;
   font-weight: 600;
   color: $text-secondary;
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+.chart-empty,
+.ev-empty {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-tertiary;
+  font-size: 12px;
+}
+.ev-empty {
+  height: auto;
+  padding: 18px 0;
+}
+.ev-count {
+  font-size: 11px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: $text-tertiary;
+  &.has {
+    background: rgba(248, 113, 113, 0.18);
+    color: $color-danger;
+  }
+}
+.ev-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px dashed $border-subtle;
+  font-size: 12px;
+  color: $text-secondary;
+  &:last-child { border-bottom: none; }
+}
+.ev-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+  background: $color-warning;
+}
+.lv-critical .ev-dot { background: $color-danger; }
+.lv-critical .ev-text { color: $color-danger; }
 .oss-table {
   width: 100%;
   border-collapse: collapse;
@@ -276,7 +407,7 @@ onUnmounted(() => {
     padding: 7px 8px;
     color: $text-secondary;
     border-bottom: 1px solid $border-subtle;
-    white-space: nowrap;
+    /* 允许换行：窄屏按比例收缩，不产生横向滚动 */
     &.strong {
       color: $text-primary;
       font-weight: 500;
@@ -301,6 +432,14 @@ onUnmounted(() => {
 @media (max-width: 1400px) {
   .oss-metrics {
     grid-template-columns: repeat(3, 1fr);
+  }
+  .oss-insight {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .oss-metrics {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>

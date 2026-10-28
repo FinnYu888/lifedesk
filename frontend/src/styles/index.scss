@@ -504,3 +504,187 @@ html[data-theme="cream"] {
     background-color: rgba(150, 118, 64, 0.06) !important;
   }
 }
+
+/* ============================================================
+   末日科幻主题（doomsday）：暗色末世琥珀调 + 各菜单页专属实景背景图
+   背景图由 MainLayout 的 .doomsday-bg 层按路由注入，并叠加暗色蒙版，
+   让图片的光影/明暗不影响数据呈现；图片以 cover 自适应屏幕大小。
+   以下仅覆盖必要壳层（侧栏/顶栏/Tab/按钮）的底色，确保深色文字与图标清晰。
+   ============================================================ */
+html[data-theme="doomsday"] {
+  --el-color-primary: #ff8a3d;
+  --el-color-primary-light-3: #ffa35f;
+  --el-color-primary-light-5: #ffb982;
+  --el-color-primary-light-7: #ffd2ad;
+  --el-color-primary-light-8: #ffe1c7;
+  --el-color-primary-light-9: #ffedd9;
+  --el-color-primary-dark-2: #e06f24;
+  --ld-accent: #ff8a3d;             // 末世琥珀
+  --ld-accent-light: #ffb066;       // 亮琥珀
+  --ld-color-positive: #4ade80;
+  --ld-color-warning: #fbbf24;
+  --ld-color-danger: #f87171;
+  --ld-color-neutral: #8a8378;
+  --ld-bg-page: #07070a;            // 近黑底（背景图加载失败时兜底）
+  --ld-bg-page-grad: #07070a;
+  --ld-bg-card: rgba(14, 13, 18, 0.62);   // 卡片更不透明，保证数据可读
+  --ld-bg-card-hover: rgba(22, 20, 26, 0.72);
+  --ld-bg-sidebar: rgba(8, 8, 12, 0.78);
+  --ld-border-subtle: rgba(255, 255, 255, 0.10);
+  --ld-border-accent: rgba(255, 138, 61, 0.45);
+  --ld-border-glass: rgba(255, 255, 255, 0.12);
+  --ld-text-primary: #f3efe6;
+  --ld-text-secondary: #c3bcae;
+  --ld-text-tertiary: #8a8478;
+  --ld-radius-card: 16px;
+  --ld-radius-md: 14px;
+  --ld-radius-sm: 10px;
+  --ld-shadow-card: 0 12px 34px rgba(0, 0, 0, 0.5);
+  --ld-shadow-glass: 0 10px 34px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  --ld-glow-accent: 0 0 24px rgba(255, 138, 61, 0.35);
+  --ld-input-bg: rgba(14, 13, 18, 0.80);
+  --ld-input-bg-hover: rgba(22, 20, 26, 0.90);
+  --ld-input-border: rgba(255, 138, 61, 0.30);
+  --ld-input-placeholder: #8a8478;
+  --ld-popover-bg: rgba(16, 15, 20, 0.97);
+
+  // 壳层底色覆写（侧栏/顶栏/Tab 栏/工具条）：暗色半透明，避免背景图透出过亮
+  .sidebar {
+    background: rgba(7, 7, 10, 0.80) !important;
+  }
+  .topbar,
+  .menu-tab-bar {
+    background: rgba(7, 7, 10, 0.66) !important;
+  }
+  .tab-toolbar {
+    background: rgba(7, 7, 10, 0.70) !important;
+  }
+
+  // 侧栏菜单：紫色 tint → 琥珀 tint
+  .nav-item:hover {
+    background: rgba(255, 138, 61, 0.10);
+    color: $text-primary;
+  }
+  .nav-item-active {
+    background: rgba(255, 138, 61, 0.16);
+    color: #ffb066;
+    border-color: rgba(255, 138, 61, 0.45);
+  }
+  .nav-item:not(.dragging):hover {
+    box-shadow: inset 0 0 0 1px rgba(255, 138, 61, 0.14);
+  }
+  .nav-add {
+    &:hover {
+      background: rgba(255, 138, 61, 0.12);
+      color: #ffb066;
+      border-color: rgba(255, 138, 61, 0.6);
+    }
+  }
+  .health-mini {
+    background: rgba(14, 13, 18, 0.62);
+  }
+
+  // Tab 标签：暖灰底 + 琥珀 hover/激活
+  .menu-tab {
+    background: rgba(14, 13, 18, 0.62);
+    color: #c3bcae;
+    &:hover {
+      background: rgba(255, 138, 61, 0.12);
+      color: #f3efe6;
+      border-color: rgba(255, 138, 61, 0.45);
+    }
+  }
+  .menu-tab.active {
+    background: linear-gradient(135deg, rgba(255, 138, 61, 0.32), rgba(255, 176, 102, 0.16));
+    color: #ffb066;
+    border-color: rgba(255, 138, 61, 0.55);
+    box-shadow: 0 0 14px rgba(255, 138, 61, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  }
+
+  // 通用按钮 + 主色按钮 hover 光晕（琥珀）
+  .ld-btn {
+    background: rgba(14, 13, 18, 0.55);
+    &:hover:not(:disabled) {
+      background: rgba(255, 138, 61, 0.12);
+      color: #f3efe6;
+    }
+  }
+  .ld-btn-primary:hover:not(:disabled) {
+    box-shadow: 0 4px 14px rgba(255, 138, 61, 0.35);
+  }
+
+  // 主题切换按钮：琥珀 variant
+  .theme-toggle {
+    background: rgba(255, 138, 61, 0.10);
+    border-color: rgba(255, 138, 61, 0.38);
+    color: #c3bcae;
+    &:hover {
+      color: #ffb066;
+      border-color: rgba(255, 138, 61, 0.7);
+      background: rgba(255, 138, 61, 0.18);
+      box-shadow: 0 0 14px rgba(255, 138, 61, 0.4);
+    }
+  }
+
+  // 卡片 hover：琥珀描边光晕（覆盖深色系黑投影）
+  .ld-card:hover {
+    border-color: rgba(255, 138, 61, 0.5);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5), 0 0 22px rgba(255, 138, 61, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+}
+
+/* 末日科幻主题：卡片切角装饰采琥珀色（沿用科技风 HUD 切角结构） */
+html[data-theme="doomsday"] .ld-card {
+  &::before,
+  &::after {
+    border-color: rgba(255, 138, 61, 0.75);
+  }
+}
+
+/* 末日科幻主题：全屏背景图层（图片 + 暗色蒙版），置于内容之下，随屏幕 cover 自适应 */
+.doomsday-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.dbg-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  // 压低亮部、略增强饱和，削弱原图光影对数据的干扰
+  filter: brightness(0.58) saturate(1.08) contrast(1.02);
+  transition: background-image 0.45s ease, opacity 0.45s ease;
+}
+.dbg-scrim {
+  position: absolute;
+  inset: 0;
+  // 顶部略透（保留画面氛围）、底部加深（数据区更暗更易读）+ 中心到四周轻微暗角
+  background:
+    linear-gradient(180deg, rgba(7, 7, 10, 0.30) 0%, rgba(7, 7, 10, 0.52) 55%, rgba(7, 7, 10, 0.74) 100%),
+    radial-gradient(135% 120% at 50% -8%, rgba(7, 7, 10, 0.0) 0%, rgba(7, 7, 10, 0.42) 72%);
+}
+
+/* ===================================================================
+   一屏自适应（全局）：窗口变小/换到笔记本屏幕时，页面宽度按比例收缩，
+   任何页面都不出现页面级横向滚动条（局部表格等由各页面自行处理）。
+   =================================================================== */
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* 通用卡片在 flex/grid 容器中允许收缩，防止内容撑破容器 */
+.ld-card {
+  min-width: 0;
+}
+
+/* Element Plus 表格容器：窄屏时表头内部滚动而非撑破页面 */
+.el-table {
+  max-width: 100%;
+}

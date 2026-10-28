@@ -8,7 +8,7 @@
         <el-tag v-else size="small" type="danger" effect="plain">异常</el-tag>
       </div>
       <div class="mq-actions">
-        <span class="mq-fetched">更新于 {{ data.fetchedAt || '—' }}</span>
+        <span class="mq-fetched">更新于 {{ data.fetchedAt || "—" }}</span>
         <button class="ld-btn ld-btn-ghost sm" :disabled="loading" @click="load(true)">
           <el-icon><Refresh /></el-icon>
         </button>
@@ -18,7 +18,7 @@
     <!-- 采集失败提示 -->
     <div v-if="loaded && !healthy && !data.cluster" class="mq-error">
       <el-icon :size="18"><WarningFilled /></el-icon>
-      <span>{{ data.errMsg || '无法连接 RocketMQ Dashboard' }}</span>
+      <span>{{ data.errMsg || "无法连接 RocketMQ Dashboard" }}</span>
     </div>
 
     <template v-if="data.cluster">
@@ -29,7 +29,7 @@
           <span class="mm-label">Broker 节点</span>
         </div>
         <div class="mq-metric">
-          <span class="mm-value">{{ c.bizTopicTotal }}<i>/{{ c.topicTotal }}</i></span>
+          <span class="mm-value">{{ num(c.bizTopicTotal) }}<i>/{{ num(c.topicTotal) }}</i></span>
           <span class="mm-label">业务/全部 Topic</span>
         </div>
         <div class="mq-metric">
@@ -58,6 +58,26 @@
         </div>
       </div>
 
+      <!-- 图表 + 关键事件 -->
+      <div class="mq-insight">
+        <div class="mq-chart-box">
+          <div class="mq-sub-title">各 Broker 今日收发消息量</div>
+          <VChart v-if="barOption" :option="barOption" autoresize style="height: 230px" />
+          <div v-else class="chart-empty">无节点数据</div>
+        </div>
+        <div class="mq-events-box">
+          <div class="mq-sub-title">
+            关键事件
+            <span class="ev-count" :class="{ 'has': events.length }">{{ events.length }}</span>
+          </div>
+          <div v-if="!events.length" class="ev-empty">近期无异常事件 🎉</div>
+          <div v-for="(e, i) in events" :key="i" class="ev-item" :class="'lv-' + e.level">
+            <span class="ev-dot" />
+            <span class="ev-text">{{ e.text }}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="mq-tables">
         <!-- Broker 节点明细 -->
         <div class="mq-table-box">
@@ -82,11 +102,11 @@
                 <td>
                   <template v-if="b.master">
                     <span class="b-dot" :class="b.active ? 'dot-positive' : 'dot-danger'" />
-                    {{ b.active ? '在线' : '离线' }}
+                    {{ b.active ? "在线" : "离线" }}
                   </template>
                   <span v-else class="slave-tag">备节点</span>
                 </td>
-                <td>{{ b.version || '—' }}</td>
+                <td>{{ b.version || "—" }}</td>
                 <td>{{ b.putTps }}</td>
                 <td>{{ b.getFoundTps }}</td>
                 <td>{{ num(b.todayPut) }} / {{ num(b.todayGet) }}</td>
@@ -98,7 +118,7 @@
                   />
                 </td>
                 <td>{{ b.putLatency99 }}ms</td>
-                <td>{{ b.runtime || '—' }}</td>
+                <td>{{ b.runtime || "—" }}</td>
               </tr>
               <tr v-if="!data.brokers?.length">
                 <td colspan="9" class="empty">无节点数据</td>
@@ -117,6 +137,7 @@
                 <th>在线实例</th>
                 <th>消费 TPS</th>
                 <th>积压消息</th>
+                <th>等待时长</th>
               </tr>
             </thead>
             <tbody>
@@ -125,9 +146,12 @@
                 <td>{{ g.consumerCount }}</td>
                 <td>{{ g.consumeTps }}</td>
                 <td class="lag-num">{{ num(g.lag) }}</td>
+                <td :class="{ 'lag-num': g.delaySec >= 300 || g.delaySec === -1 }">
+                  {{ g.delaySec === -1 ? "停滞" : delayText(g.delaySec) }}
+                </td>
               </tr>
               <tr v-if="!data.topLag?.length">
-                <td colspan="4" class="empty">无积压，消费健康 🎉</td>
+                <td colspan="5" class="empty">无积压，消费健康 🎉</td>
               </tr>
             </tbody>
           </table>
@@ -140,7 +164,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { Refresh, WarningFilled } from "@element-plus/icons-vue";
+import VChart from "vue-echarts";
+import { use } from "echarts/core";
+import { CanvasRenderer } from "echarts/renderers";
+import { BarChart } from "echarts/charts";
+import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
 import { fetchRocketMqOverview, refreshRocketMqOverview } from "@/api/extMonitor";
+
+use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent]);
 
 defineOptions({ name: "RocketMqPanel" });
 
@@ -163,6 +194,70 @@ function num(v: any): string {
 function pct(v: any): string {
   return Math.round((Number(v) || 0) * 1000) / 10 + "%";
 }
+function delayText(sec: number): string {
+  if (!sec || sec < 0) return "—";
+  if (sec >= 3600) return Math.round(sec / 3600) + "h";
+  if (sec >= 60) return Math.round(sec / 60) + "m";
+  return sec + "s";
+}
+
+/** 各 Broker 今日收/发柱状图 */
+const barOption = computed(() => {
+  const brokers = data.value.brokers || [];
+  if (!brokers.length) return null;
+  return {
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    legend: { data: ["今日收", "今日发"], textStyle: { color: "#a8a0c8", fontSize: 11 } },
+    grid: { left: 8, right: 12, top: 30, bottom: 20, containLabel: true },
+    xAxis: {
+      type: "category",
+      data: brokers.map((b: any) => b.name + "#" + b.brokerId),
+      axisLabel: { color: "#a8a0c8", fontSize: 10, rotate: brokers.length > 4 ? 30 : 0 }
+    },
+    yAxis: {
+      type: "value",
+      axisLabel: { color: "#a8a0c8", fontSize: 10 }
+    },
+    series: [
+      {
+        name: "今日收",
+        type: "bar",
+        data: brokers.map((b: any) => b.todayPut),
+        itemStyle: { color: "#2dd4bf", borderRadius: [3, 3, 0, 0] }
+      },
+      {
+        name: "今日发",
+        type: "bar",
+        data: brokers.map((b: any) => b.todayGet),
+        itemStyle: { color: "#a78bfa", borderRadius: [3, 3, 0, 0] }
+      }
+    ]
+  };
+});
+
+/** 关键事件（异常聚合） */
+const events = computed(() => {
+  const list: { level: "critical" | "warning"; text: string }[] = [];
+  const cl = data.value.cluster || {};
+  (data.value.brokers || []).forEach((b: any) => {
+    if (b.master && !b.active) {
+      list.push({ level: "critical", text: `Broker ${b.name}#${b.brokerId} 离线` });
+    }
+    if (b.diskRatio >= 0.7) {
+      list.push({ level: "warning", text: `Broker ${b.name}#${b.brokerId} 磁盘占用 ${pct(b.diskRatio)}` });
+    }
+    if (b.putLatency99 >= 200) {
+      list.push({ level: "warning", text: `Broker ${b.name} 写延迟 P99 ${b.putLatency99}ms` });
+    }
+  });
+  if (cl.totalLag > 0) {
+    list.push({ level: "warning", text: `消息积压 ${num(cl.totalLag)} 条待消费` });
+  }
+  if (cl.maxDiskRatio >= 0.7 && !list.some((e) => e.text.includes("磁盘"))) {
+    list.push({ level: "warning", text: `集群最大磁盘占用 ${pct(cl.maxDiskRatio)}` });
+  }
+  return list;
+});
 
 /** 向父级（服务器状态列表）上报实时状态 */
 function reportStatus() {
@@ -255,9 +350,12 @@ onUnmounted(() => {
 }
 .mq-metrics {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); /* 自适应换列，窄屏不溢出 */
   gap: 10px;
   margin-bottom: 16px;
+}
+.mq-metrics > * {
+  min-width: 0;
 }
 .mq-metric {
   display: flex;
@@ -285,16 +383,84 @@ onUnmounted(() => {
   font-size: 11px;
   color: $text-tertiary;
 }
-.mq-tables {
+
+// 图表 + 关键事件 并排
+.mq-insight {
   display: grid;
-  grid-template-columns: 3fr 2fr;
+  grid-template-columns: minmax(0, 1fr) 280px; /* 图表列可收缩，防 ECharts 撑破 */
   gap: 14px;
+  margin-bottom: 16px;
+}
+.mq-insight > * {
+  min-width: 0;
+}
+.mq-chart-box,
+.mq-events-box {
+  border: 1px solid $border-subtle;
+  border-radius: $radius-sm;
+  padding: 12px;
 }
 .mq-sub-title {
   font-size: 13px;
   font-weight: 600;
   color: $text-secondary;
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chart-empty,
+.ev-empty {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-tertiary;
+  font-size: 12px;
+}
+.ev-empty {
+  height: auto;
+  padding: 18px 0;
+}
+.ev-count {
+  font-size: 11px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: $text-tertiary;
+  &.has {
+    background: rgba(248, 113, 113, 0.18);
+    color: $color-danger;
+  }
+}
+.ev-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px dashed $border-subtle;
+  font-size: 12px;
+  color: $text-secondary;
+  &:last-child { border-bottom: none; }
+}
+.ev-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+  background: $color-warning;
+}
+.lv-critical .ev-dot { background: $color-danger; }
+.lv-critical .ev-text { color: $color-danger; }
+
+.mq-tables {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 14px;
+}
+.mq-tables > * {
+  min-width: 0;
 }
 .mq-table {
   width: 100%;
@@ -312,7 +478,7 @@ onUnmounted(() => {
     padding: 7px 8px;
     color: $text-secondary;
     border-bottom: 1px solid $border-subtle;
-    white-space: nowrap;
+    /* 允许换行：窄屏按比例收缩，不产生横向滚动 */
     &.strong {
       color: $text-primary;
       font-weight: 500;
@@ -323,7 +489,7 @@ onUnmounted(() => {
   }
 }
 .group-name {
-  max-width: 220px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -340,7 +506,6 @@ onUnmounted(() => {
 }
 .slave-tag {
   color: $text-tertiary;
-  // 旧版控制台 slave 不上报 brokerActive（仅 master 有心跳），固定显示备节点
 }
 .disk-cell {
   width: 90px;
@@ -360,6 +525,14 @@ onUnmounted(() => {
   }
   .mq-tables {
     grid-template-columns: 1fr;
+  }
+  .mq-insight {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .mq-metrics {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>

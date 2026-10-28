@@ -1,6 +1,7 @@
 package com.lifedesk.extmonitor;
 
 import com.lifedesk.common.R;
+import com.lifedesk.extmonitor.alert.AlertCenter;
 import com.lifedesk.extmonitor.mysql.MysqlMonitorService;
 import com.lifedesk.extmonitor.oss.OssMonitorService;
 import com.lifedesk.extmonitor.redis.RedisMonitorService;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -31,6 +33,24 @@ public class ExtMonitorController {
     private final RedisMonitorService redisMonitorService;
     private final MysqlMonitorService mysqlMonitorService;
     private final OssMonitorService ossMonitorService;
+    private final AlertCenter alertCenter;
+
+    /** 当前活跃告警列表 + 数量（右上角闹铃徽标数据源） */
+    @GetMapping("/alerts")
+    public R<Map<String, Object>> alerts() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", alertCenter.active());
+        result.put("count", alertCenter.activeCount());
+        return R.ok(result);
+    }
+
+    /** Redis 24h 趋势采样（QPS / 内存 / 命中率 / 连接数，30s 一个点） */
+    @GetMapping("/redis/trend")
+    public R<Map<String, Object>> redisTrend() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("points", redisMonitorService.trend());
+        return R.ok(result);
+    }
 
     /** RocketMQ 集群总览（缓存 30s） */
     @GetMapping("/rocketmq/overview")

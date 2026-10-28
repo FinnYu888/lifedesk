@@ -109,3 +109,9 @@ ext-monitor:
     # 监控的桶列表；对象量大时全量统计需数分钟，采用后台异步统计 + 长缓存
     buckets: wlprdytcdsbucket01,wlprdskcdsbucket01
     cache-ttl-seconds: 3600
+  # 告警评估规则（后台定时 30s 评估各监控源，命中即写入告警中心，右上角闹铃展示）
+  alert:
+    # 队列消费延迟告警阈值（秒）：最早未消费消息等待超过该值即告警，默认 5 分钟
+    lag-delay-seconds: 300
+    # 触发延迟告警的每消费组最小积压量（避免 1 条消息抖动误报），默认 10
+    lag-delay-min-lag: 10

@@ -209,11 +209,14 @@ public class RocketMqMonitorService {
                 if (consumerCount > 0) onlineGroups++;
                 if (diff > 0) {
                     totalLag += diff;
+                    double consumeTps = g.path("consumeTps").asDouble(0);
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("group", g.path("group").asText());
                     item.put("consumerCount", consumerCount);
-                    item.put("consumeTps", g.path("consumeTps").asDouble(0));
+                    item.put("consumeTps", consumeTps);
                     item.put("lag", diff);
+                    // 预估最早未消费消息等待时长（积压/消费TPS）；-1 表示消费停滞（无消费速率）
+                    item.put("delaySec", consumeTps > 0 ? Math.round(diff / consumeTps) : -1L);
                     topLag.add(item);
                 }
                 totalConsumeTps += g.path("consumeTps").asDouble(0);

@@ -1442,11 +1442,7 @@ function detach(id: RegionId): void {
 }
 
 // ===== 长按进入拖拽（避免与卡片内点击/滚动冲突） =====
-// armedRegion：mousedown 时立即置位 —— draggable 必须在按下时就绪，
-// 浏览器才会在本次按压中启动拖拽（长按后才置 true 时按住拖动不会触发 dragstart）
-const armedRegion = ref<RegionId | null>(null);
-// armedVisual：长按 280ms 后置位，仅控制视觉反馈（grabbing 光标/描边）
-const armedVisual = ref<RegionId | null>(null);
+const armedRegion = ref<RegionId | null>(null); // 长按后武装：draggable 生效
 const draggingRegion = ref<RegionId | null>(null);
 const dropTarget = ref<RegionId | null>(null); // 区域换位目标
 const colDropTarget = ref<number | null>(null); // 列底空白追加目标
@@ -1465,10 +1461,8 @@ function onRegionMouseDown(id: RegionId, e: MouseEvent) {
     return;
   }
   clearPressTimer();
-  // 立即武装 draggable（拖拽能力就绪）；280ms 后才显示视觉反馈
-  armedRegion.value = id;
   pressTimer = setTimeout(() => {
-    armedVisual.value = id;
+    armedRegion.value = id;
   }, 280);
 }
 
@@ -1479,15 +1473,10 @@ function clearPressTimer() {
   }
 }
 
-function clearArmState() {
+/** 未发生拖动的 mouseup：取消长按武装（否则松手后元素仍 draggable，再移动会误拖） */
+function onRegionMouseUp() {
   clearPressTimer();
   armedRegion.value = null;
-  armedVisual.value = null;
-}
-
-/** 未发生拖动的 mouseup：取消拖拽武装（否则松手后元素仍 draggable，再移动会误拖） */
-function onRegionMouseUp() {
-  clearArmState();
 }
 
 function onRegionDragStart(id: RegionId, e: DragEvent) {
@@ -1583,16 +1572,17 @@ function onEdgeDrop(side: "left" | "right", e: DragEvent) {
 
 function onRegionDragEnd() {
   draggingRegion.value = null;
-  clearArmState();
+  armedRegion.value = null;
   dropTarget.value = null;
   colDropTarget.value = null;
   edgeTarget.value = null;
+  clearPressTimer();
 }
 
 /** 区域样式类：拖拽中半透明、目标位置虚线高亮 */
 function regionCls(id: RegionId): Record<string, boolean> {
   return {
-    armed: armedVisual.value === id,
+    armed: armedRegion.value === id,
     dragging: draggingRegion.value === id,
     "drop-target": dropTarget.value === id
   };
@@ -1601,12 +1591,9 @@ function regionCls(id: RegionId): Record<string, boolean> {
 onMounted(() => {
   load();
   loadRptPassRate();
-  // 全局兜底：按住后移出卡片在别处松手，卡片收不到 mouseup，会残留 draggable=true
-  document.addEventListener("mouseup", clearArmState, true);
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener("mouseup", clearArmState, true);
   clearPressTimer();
 });
 </script>
@@ -1721,7 +1708,7 @@ html[data-theme="cream"] .ov-metric.rose   .ov-value { color: #c94f7c; }
 }
 .board-col {
   flex: 1 1 0;
-  min-width: 260px; /* 列数多时保持可读宽度，超出横向滚动 */
+  min-width: 0; /* 一屏自适应：各列按比例收缩，不出现横向滚动条 */
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2178,7 +2165,7 @@ html[data-theme="cream"] .ov-metric.rose   .ov-value { color: #c94f7c; }
 }
 .auth-input {
   flex: 1;
-  min-width: 240px;
+  min-width: 0; /* 一屏自适应：允许随容器收缩 */
 }
 /* auth 输入框玻璃风格适配 */
 .auth-input :deep(.el-input__wrapper) {

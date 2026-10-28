@@ -52,6 +52,46 @@ public class RedisMonitorService {
     private volatile Map<String, Object> cached;
     private volatile long cachedAt;
 
+    // ==================== 24h 趋势采样（内存滚动窗口） ====================
+
+    /** 采样间隔 30s × 24h = 2880 点滚动窗口 */
+    private static final int TREND_MAX_POINTS = 2880;
+
+    private final java.util.Deque<Map<String, Object>> trendHistory = new java.util.concurrent.ConcurrentLinkedDeque<>();
+
+    /**
+     * 记录一个趋势采样点（由告警评估器每 30s 调用，采集失败时跳过）。
+     * 点结构：{time, ops, usedMb, hitRate, clients}
+     */
+    public void recordTrendPoint(Map<String, Object> overview) {
+        if (!Boolean.TRUE.equals(overview.get("ok"))) {
+            return;
+        }
+        try {
+            Map<?, ?> stats = (Map<?, ?>) overview.get("stats");
+            Map<?, ?> memory = (Map<?, ?>) overview.get("memory");
+            Map<?, ?> clients = (Map<?, ?>) overview.get("clients");
+            Map<String, Object> point = new LinkedHashMap<>();
+            point.put("time", new SimpleDateFormat("HH:mm:ss").format(new Date()));
+            point.put("ops", stats != null && stats.get("opsPerSec") != null ? ((Number) stats.get("opsPerSec")).longValue() : 0L);
+            long usedBytes = memory != null && memory.get("usedBytes") != null ? ((Number) memory.get("usedBytes")).longValue() : 0L;
+            point.put("usedMb", Math.round(usedBytes / 1048576.0 * 10) / 10.0);
+            point.put("hitRate", stats != null && stats.get("hitRate") != null ? ((Number) stats.get("hitRate")).doubleValue() : 0.0);
+            point.put("clients", clients != null && clients.get("connected") != null ? ((Number) clients.get("connected")).longValue() : 0L);
+            trendHistory.addLast(point);
+            while (trendHistory.size() > TREND_MAX_POINTS) {
+                trendHistory.pollFirst();
+            }
+        } catch (Exception e) {
+            log.warn("Redis trend record failed: {}", e.getMessage());
+        }
+    }
+
+    /** 24h 趋势采样序列（按时间升序） */
+    public List<Map<String, Object>> trend() {
+        return new ArrayList<>(trendHistory);
+    }
+
     @PostConstruct
     void init() {
         dbList = new ArrayList<>();

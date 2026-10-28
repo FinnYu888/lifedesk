@@ -1,5 +1,14 @@
 <template>
   <div class="layout">
+    <!-- 末日科幻主题：按当前路由注入对应实景背景图（全屏、cover 自适应），叠加暗色蒙版保证数据可读 -->
+    <div v-if="theme === 'doomsday'" class="doomsday-bg" aria-hidden="true">
+      <div
+        class="dbg-img"
+        :style="doomsdayBg ? { backgroundImage: `url(${doomsdayBg})` } : {}"
+      ></div>
+      <div class="dbg-scrim"></div>
+    </div>
+
     <!-- 左侧固定侧边栏（液态玻璃） -->
     <aside class="sidebar">
       <div class="brand">
@@ -94,13 +103,56 @@
           @click="toggleTheme"
         >
           <el-icon :size="18">
-            <component :is="theme === 'tech' ? Cpu : theme === 'cream' ? MilkTea : Sunny" />
+            <component :is="theme === 'tech' ? Cpu : theme === 'cream' ? MilkTea : theme === 'doomsday' ? Moon : Sunny" />
           </el-icon>
           <span>{{ THEME_LABEL[theme] }}</span>
         </button>
-        <el-badge :value="3" class="bell">
-          <el-icon :size="20"><Bell /></el-icon>
-        </el-badge>
+        <!-- 告警闹铃：徽标展示当前活跃告警数量；hover 或点击弹出告警明细 -->
+        <div
+          class="bell"
+          :class="{ 'bell-active': alertCount > 0 }"
+          @mouseenter="bellOpen = true"
+          @mouseleave="bellOpen = false"
+          @click="bellOpen = !bellOpen"
+        >
+          <el-badge :value="alertCount" :hidden="alertCount === 0" :max="99" class="bell-badge">
+            <el-icon :size="20"><Bell /></el-icon>
+          </el-badge>
+
+          <!-- 告警明细弹层 -->
+          <div
+            v-show="bellOpen"
+            class="bell-pop"
+            @mouseenter="bellOpen = true"
+            @mouseleave="bellOpen = false"
+          >
+            <div class="bell-pop-head">
+              <span class="bph-title">当前告警</span>
+              <span class="bph-count" :class="{ danger: alertCount > 0 }">{{ alertCount }} 条</span>
+            </div>
+            <div v-if="alertCount === 0" class="bell-pop-empty">
+              <el-icon><CircleCheck /></el-icon>
+              <span>所有中间件运行正常，暂无活跃告警</span>
+            </div>
+            <div v-else class="bell-pop-list">
+              <div
+                v-for="a in alerts"
+                :key="a.key"
+                class="bell-pop-item"
+                :class="'lv-' + a.level"
+              >
+                <div class="bpi-head">
+                  <span class="bpi-source">{{ sourceLabel(a.source) }}</span>
+                  <span class="bpi-level">{{ levelLabel(a.level) }}</span>
+                </div>
+                <div class="bpi-msg">{{ a.message }}</div>
+                <div class="bpi-time">
+                  首次 {{ a.firstTime }} · 最近 {{ a.lastTime }} · 触发 {{ a.count }} 次
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </header>
 
       <!-- 菜单 Tab 栏：内置菜单 + 自定义菜单统一切换。
@@ -238,6 +290,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import {
   Search,
   Bell,
+  CircleCheck,
   HomeFilled,
   Folder,
   List,
@@ -256,11 +309,13 @@ import {
   Delete,
   TopRight,
   Loading,
-  MilkTea
+  MilkTea,
+  Moon
 } from "@element-plus/icons-vue";
 import { useCustomMenus } from "@/composables/useCustomMenus";
 import { useMenuTabs } from "@/composables/useMenuTabs";
 import { useTheme } from "@/composables/useTheme";
+import { useAlerts, startAlertPolling } from "@/composables/useAlerts";
 import type { CustomMenu } from "@/api/customMenu";
 
 defineOptions({ name: "MainLayout" });
@@ -269,16 +324,36 @@ const route = useRoute();
 const router = useRouter();
 // ===== 主题切换 =====
 const { theme, toggleTheme, THEME_LABEL } = useTheme();
+
+// ===== 告警闹铃（全局单例轮询，共享给系统监控页） =====
+const { alerts, alertCount, sourceLabel, levelLabel } = useAlerts();
+const bellOpen = ref(false);
+
 const pageTitle = computed(() => {
   // tab 模式下优先显示当前 tab 名
   if (tabMode.value && activeTab.value) return activeTab.value.name;
   return (route.meta.title as string) || "LifeDesk";
 });
 
+// ===== 末日科幻主题：前 10 个内置菜单页各自的实景背景图（按路由映射） =====
+const DOOMSDAY_BG: Record<string, string> = {
+  "/dashboard": "/theme/doomsday/bg-01.jpg",
+  "/project": "/theme/doomsday/bg-02.png",
+  "/task": "/theme/doomsday/bg-03.jpg",
+  "/schedule": "/theme/doomsday/bg-04.jpg",
+  "/monitor": "/theme/doomsday/bg-05.jpg",
+  "/skill": "/theme/doomsday/bg-06.jpg",
+  "/bookmark": "/theme/doomsday/bg-07.jpg",
+  "/english": "/theme/doomsday/bg-08.jpg",
+  "/health": "/theme/doomsday/bg-09.jpg",
+  "/apps": "/theme/doomsday/bg-10.jpg"
+};
+const doomsdayBg = computed(() => DOOMSDAY_BG[route.path] || "");
+
 const navItems = [
   { path: "/dashboard", label: "首页", icon: HomeFilled },
   { path: "/project", label: "项目管理", icon: Folder },
-  { path: "/task", label: "每日速览", icon: List },
+  { path: "/task", label: "任务工单", icon: List },
   { path: "/schedule", label: "日程会议", icon: Calendar },
   { path: "/monitor", label: "系统监控", icon: Monitor },
   { path: "/skill", label: "Skills 工坊", icon: Trophy },
@@ -541,6 +616,7 @@ async function onTabDelete() {
 
 onMounted(() => {
   loadCustomMenus();
+  startAlertPolling();
 });
 </script>
 
@@ -555,6 +631,8 @@ onMounted(() => {
 .sidebar {
   width: 240px;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
   background: $bg-sidebar;
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
@@ -727,6 +805,8 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
+  z-index: 1;
 }
 // 顶栏：玻璃风格（让 content 的渐变光斑透过顶栏）
 .topbar {
@@ -754,6 +834,116 @@ onMounted(() => {
   margin-left: auto;
   cursor: pointer;
   color: $text-secondary;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  &:hover {
+    color: $accent-light;
+  }
+}
+.bell-active {
+  color: $color-danger;
+  .bell-badge :deep(.el-badge__content) {
+    background: $color-danger;
+    border-color: $color-danger;
+  }
+}
+.bell-badge {
+  display: inline-flex;
+}
+// 告警明细弹层（hover / 点击均可展开）
+.bell-pop {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: -8px;
+  width: 360px;
+  max-width: 80vw;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 10px;
+  background: $bg-card;
+  border: 1px solid $border-glass;
+  border-radius: $radius-md;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  z-index: 50;
+  scrollbar-width: thin;
+  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.35); border-radius: 3px; }
+}
+.bell-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 10px;
+  border-bottom: 1px solid $border-subtle;
+  margin-bottom: 8px;
+}
+.bph-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: $text-primary;
+}
+.bph-count {
+  font-size: 12px;
+  color: $text-tertiary;
+  &.danger {
+    color: $color-danger;
+    font-weight: 700;
+  }
+}
+.bell-pop-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 10px;
+  font-size: 13px;
+  color: $color-positive;
+}
+.bell-pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bell-pop-item {
+  padding: 9px 10px;
+  border-radius: $radius-sm;
+  border: 1px solid $border-subtle;
+  border-left: 3px solid $text-tertiary;
+  background: rgba(255, 255, 255, 0.02);
+  &.lv-critical { border-left-color: $color-danger; }
+  &.lv-warning { border-left-color: $color-warning; }
+}
+.bpi-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.bpi-source {
+  font-size: 12px;
+  font-weight: 600;
+  color: $text-primary;
+}
+.bpi-level {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  color: #fff;
+  &.lv-critical, &.lv-warning { }
+}
+.lv-critical .bpi-level { background: $color-danger; }
+.lv-warning .bpi-level { background: $color-warning; }
+.bpi-msg {
+  font-size: 12px;
+  color: $text-secondary;
+  line-height: 1.5;
+}
+.bpi-time {
+  margin-top: 4px;
+  font-size: 11px;
+  color: $text-tertiary;
 }
 
 // 主题切换按钮：跟随主题变量自动换肤
@@ -807,6 +997,7 @@ html[data-theme="cream"] .theme-toggle {
 .content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden; /* 一屏自适应：杜绝页面级横向滚动条 */
   padding: 0;             /* 取消外层 padding，由内部 .router-view-wrap / .tab-view 自管理 */
   display: flex;
   flex-direction: column;
@@ -817,6 +1008,7 @@ html[data-theme="cream"] .theme-toggle {
   flex: 1;
   padding: 22px;
   overflow-y: auto;
+  overflow-x: hidden; /* 一屏自适应：宽度按比例收缩，不出现横向滚动 */
   min-width: 0;
 }
 /* 窄屏自适应：缩小内边距，给内容更多空间 */

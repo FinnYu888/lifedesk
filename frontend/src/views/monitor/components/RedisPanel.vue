@@ -8,7 +8,7 @@
         <el-tag v-else size="small" type="danger" effect="plain">异常</el-tag>
       </div>
       <div class="redis-actions">
-        <span class="redis-fetched">{{ addr }} · 更新于 {{ data.fetchedAt || '—' }}</span>
+        <span class="redis-fetched">{{ addr }} · 更新于 {{ data.fetchedAt || "—" }}</span>
         <button class="ld-btn ld-btn-ghost sm" :disabled="loading" @click="load(true)">
           <el-icon><Refresh /></el-icon>
         </button>
@@ -18,7 +18,7 @@
     <!-- 采集失败提示 -->
     <div v-if="loaded && !healthy && !data.server" class="redis-error">
       <el-icon :size="18"><WarningFilled /></el-icon>
-      <span>{{ data.errMsg || '无法连接 Redis' }}</span>
+      <span>{{ data.errMsg || "无法连接 Redis" }}</span>
     </div>
 
     <template v-if="data.server">
@@ -58,6 +58,26 @@
         </div>
       </div>
 
+      <!-- 图表 + 关键事件 -->
+      <div class="redis-insight">
+        <div class="redis-chart-box">
+          <div class="redis-sub-title">键空间分布（按 Database）</div>
+          <VChart v-if="pieOption" :option="pieOption" autoresize style="height: 220px" />
+          <div v-else class="chart-empty">无键数据</div>
+        </div>
+        <div class="redis-events-box">
+          <div class="redis-sub-title">
+            关键事件
+            <span class="ev-count" :class="{ 'has': events.length }">{{ events.length }}</span>
+          </div>
+          <div v-if="!events.length" class="ev-empty">近期无异常事件 🎉</div>
+          <div v-for="(e, i) in events" :key="i" class="ev-item" :class="'lv-' + e.level">
+            <span class="ev-dot" />
+            <span class="ev-text">{{ e.text }}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="redis-tables">
         <!-- 运行信息 -->
         <div class="redis-table-box">
@@ -84,7 +104,7 @@
               <tr>
                 <td class="strong">内存碎片率</td>
                 <td :class="{ 'warn-text': m.fragRatio > 1.5 }">{{ m.fragRatio }}</td>
-                <td class="dim">>1.5 表示碎片偏高</td>
+                <td class="dim">&gt;1.5 表示碎片偏高</td>
               </tr>
               <tr>
                 <td class="strong">阻塞客户端</td>
@@ -127,7 +147,7 @@
                 <td class="strong">db{{ d.db }}</td>
                 <td>{{ num(d.keys) }}</td>
                 <td>{{ num(d.expires) }}</td>
-                <td>{{ d.avgTtl || '—' }}</td>
+                <td>{{ d.avgTtl || "—" }}</td>
               </tr>
               <tr v-if="!data.databases?.length">
                 <td colspan="4" class="empty">无数据</td>
@@ -143,7 +163,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { Refresh, WarningFilled } from "@element-plus/icons-vue";
+import VChart from "vue-echarts";
+import { use } from "echarts/core";
+import { CanvasRenderer } from "echarts/renderers";
+import { PieChart } from "echarts/charts";
+import { TooltipComponent, LegendComponent } from "echarts/components";
 import { fetchRedisOverview, refreshRedisOverview } from "@/api/extMonitor";
+
+use([CanvasRenderer, PieChart, TooltipComponent, LegendComponent]);
 
 const props = defineProps<{ addr?: string }>();
 
@@ -169,6 +196,52 @@ function num(v: any): string {
   const n = Number(v) || 0;
   return n.toLocaleString("en-US");
 }
+
+/** 键空间分布饼图 */
+const pieOption = computed(() => {
+  const dbs = (data.value.databases || []).filter((d: any) => Number(d.keys) > 0);
+  if (!dbs.length) return null;
+  return {
+    tooltip: { trigger: "item", formatter: "{b}: {c} 键 ({d}%)" },
+    legend: { bottom: 0, textStyle: { color: "#a8a0c8", fontSize: 11 } },
+    series: [
+      {
+        type: "pie",
+        radius: ["42%", "68%"],
+        center: ["50%", "44%"],
+        avoidLabelOverlap: true,
+        itemStyle: { borderColor: "rgba(0,0,0,0.2)", borderWidth: 2 },
+        label: { color: "#c9c3e6", fontSize: 11 },
+        data: dbs.map((d: any, i: number) => ({
+          name: "db" + d.db,
+          value: Number(d.keys) || 0,
+          itemStyle: { color: ["#2dd4bf", "#a78bfa", "#fbbf24", "#f472b6"][i % 4] }
+        }))
+      }
+    ]
+  };
+});
+
+/** 关键事件 */
+const events = computed(() => {
+  const list: { level: "critical" | "warning"; text: string }[] = [];
+  if (st.value.rejectedConnections > 0) {
+    list.push({ level: "warning", text: `存在 ${num(st.value.rejectedConnections)} 个被拒绝连接` });
+  }
+  if (cli.value.blocked > 0) {
+    list.push({ level: "warning", text: `${cli.value.blocked} 个阻塞客户端（BLPOP 等）` });
+  }
+  if (m.value.fragRatio > 1.5) {
+    list.push({ level: "warning", text: `内存碎片率 ${m.value.fragRatio}，偏高` });
+  }
+  if (st.value.hitRate < 50) {
+    list.push({ level: "warning", text: `缓存命中率仅 ${st.value.hitRate}%` });
+  }
+  if (st.value.evictedKeys > 0) {
+    list.push({ level: "warning", text: `已淘汰 ${num(st.value.evictedKeys)} 个键（可能内存不足）` });
+  }
+  return list;
+});
 
 async function load(force = false) {
   loading.value = true;
@@ -251,9 +324,12 @@ onUnmounted(() => {
 }
 .redis-metrics {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); /* 自适应换列，窄屏不溢出 */
   gap: 10px;
   margin-bottom: 16px;
+}
+.redis-metrics > * {
+  min-width: 0;
 }
 .redis-metric {
   display: flex;
@@ -282,16 +358,83 @@ onUnmounted(() => {
   font-size: 11px;
   color: $text-tertiary;
 }
-.redis-tables {
+
+.redis-insight {
   display: grid;
-  grid-template-columns: 3fr 2fr;
+  grid-template-columns: minmax(0, 1fr) 280px; /* 图表列可收缩，防 ECharts 撑破 */
   gap: 14px;
+  margin-bottom: 16px;
+}
+.redis-insight > * {
+  min-width: 0;
+}
+.redis-chart-box,
+.redis-events-box {
+  border: 1px solid $border-subtle;
+  border-radius: $radius-sm;
+  padding: 12px;
 }
 .redis-sub-title {
   font-size: 13px;
   font-weight: 600;
   color: $text-secondary;
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chart-empty,
+.ev-empty {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-tertiary;
+  font-size: 12px;
+}
+.ev-empty {
+  height: auto;
+  padding: 18px 0;
+}
+.ev-count {
+  font-size: 11px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: $text-tertiary;
+  &.has {
+    background: rgba(248, 113, 113, 0.18);
+    color: $color-danger;
+  }
+}
+.ev-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px dashed $border-subtle;
+  font-size: 12px;
+  color: $text-secondary;
+  &:last-child { border-bottom: none; }
+}
+.ev-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+  background: $color-warning;
+}
+.lv-critical .ev-dot { background: $color-danger; }
+.lv-critical .ev-text { color: $color-danger; }
+
+.redis-tables {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 14px;
+}
+.redis-tables > * {
+  min-width: 0;
 }
 .redis-table {
   width: 100%;
@@ -336,6 +479,14 @@ onUnmounted(() => {
   }
   .redis-tables {
     grid-template-columns: 1fr;
+  }
+  .redis-insight {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .redis-metrics {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 </style>
