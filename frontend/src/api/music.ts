@@ -30,7 +30,13 @@ export async function uploadMusicFile(file: File, title?: string, artist?: strin
   fd.append("file", file);
   if (title) fd.append("title", title);
   if (artist) fd.append("artist", artist);
-  const resp = await fetch("/api/music/upload", { method: "POST", body: fd });
+  // 认证：fetch 不走 axios 拦截器，手动附带 Bearer token
+  const token = localStorage.getItem("lifedesk-token") || "";
+  const resp = await fetch("/api/music/upload", {
+    method: "POST",
+    body: fd,
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined
+  });
   if (!resp.ok) {
     let msg = `HTTP ${resp.status}`;
     try {
@@ -45,5 +51,8 @@ export async function uploadMusicFile(file: File, title?: string, artist?: strin
 
 /** 曲目的可播放地址（外链用原地址；上传走后端流式接口） */
 export function trackSrc(t: Pick<MusicTrack, "sourceType" | "url" | "id">): string {
-  return t.sourceType === "upload" ? `/api/music/${t.id}/file` : t.url || "";
+  if (t.sourceType !== "upload") return t.url || "";
+  // <audio> 元素无法携带 Authorization 头，用查询参数传 token（后端拦截器支持）
+  const token = localStorage.getItem("lifedesk-token") || "";
+  return `/api/music/${t.id}/file?token=${encodeURIComponent(token)}`;
 }

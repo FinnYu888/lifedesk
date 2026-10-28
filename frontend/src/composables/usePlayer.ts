@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { ElMessage } from "element-plus";
 import { trackSrc, updateMusicDuration, type MusicTrack } from "@/api/music";
 
 /**
@@ -48,6 +49,9 @@ if (audio) {
   });
   audio.addEventListener("error", () => {
     playing.value = false;
+    // 播放失败明确提示（此前静默吞掉，用户点播放没声音也没原因）
+    const title = current.value?.title || "该曲目";
+    ElMessage.warning(`「${title}」无法播放：不是有效的音频直链或源文件已失效`);
   });
 }
 

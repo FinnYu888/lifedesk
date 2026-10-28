@@ -36,6 +36,11 @@ public class AuthInterceptor implements HandlerInterceptor {
         String auth = request.getHeader("Authorization");
         String token = auth != null && auth.startsWith("Bearer ") ? auth.substring(7) : null;
         Long userId = tokenStore.resolve(token);
+        // 兜底：<audio>/<video> 等媒体元素无法携带 Authorization 头，
+        // 允许 GET 请求用 ?token=xxx 查询参数鉴权（音乐文件流式播放场景）
+        if (userId == null && "GET".equalsIgnoreCase(request.getMethod())) {
+            userId = tokenStore.resolve(request.getParameter("token"));
+        }
         if (userId == null) {
             response.setStatus(401);
             response.setContentType("application/json;charset=UTF-8");
