@@ -1,16 +1,22 @@
 package com.lifedesk.config;
 
+import com.lifedesk.auth.AuthInterceptor;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * 跨域配置：允许前端 Vite 开发服务器访问后端。
+ * 跨域 + 认证拦截配置。
  *
  * @author LifeDesk
  */
 @Configuration
+@RequiredArgsConstructor
 public class CorsConfig implements WebMvcConfigurer {
+
+    private final AuthInterceptor authInterceptor;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
@@ -20,5 +26,13 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedHeaders("*")
                 .allowCredentials(true)
                 .maxAge(3600);
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        // 认证：除登录/注册/登出外全部拦截（OPTIONS 预检在拦截器内部放行）
+        registry.addInterceptor(authInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/auth/**");
     }
 }

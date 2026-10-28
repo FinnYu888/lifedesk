@@ -69,12 +69,83 @@ public class DatabaseMigration implements ApplicationRunner {
         }});
     }};
 
+    /** 需要按用户归属（user_id 隔离）的业务表：除系统监控/字典外的全部表 */
+    private static final String[] TENANT_TABLES = {
+            "project", "milestone", "commit_activity", "pull_request", "release_record",
+            "skill", "meeting", "task", "requirement", "favorite",
+            "english_task", "custom_menu", "daily_goal", "english_punch", "native_app",
+            "music_track", "workout_record", "diet_record", "diet_check", "calorie_record",
+            "weight_record", "exercise_plan", "step_record", "vital_sign"
+    };
+
     @Override
     public void run(ApplicationArguments args) {
         migrateProjectColumns();
         migrateFavoriteColumns();
         upgradeColumnTypes();
         fixProjectNullTimestamps();
+        migrateTenantColumns();
+        migrateSysUser();
+    }
+
+    /** 给所有业务表补 user_id 列（多租户数据归属），历史数据默认归属用户 1 */
+    private void migrateTenantColumns() {
+        try {
+            for (String table : TENANT_TABLES) {
+                if (!columnExistsInDb(table, "user_id")) {
+                    String sql = "ALTER TABLE " + table + " ADD COLUMN user_id BIGINT NOT NULL DEFAULT 1 COMMENT '归属用户 id'";
+                    log.info("[DBMigration] 补数据归属字段：{}", sql);
+                    jdbcTemplate.execute(sql);
+                }
+            }
+        } catch (Exception ex) {
+            log.warn("[DBMigration] user_id 迁移失败（忽略，可能表还未创建）：{}", ex.getMessage());
+        }
+    }
+
+    /**
+     * sys_user 补 username/password 列并预置账号：
+     * 用户名 俞鹏飞 / 密码 finn（id=1，全部历史数据归属该账号）。
+     * 用 INFORMATION_SCHEMA 精确判断列是否存在（JDBC meta.getColumns 在共享实例上可能误报）。
+     */
+    private void migrateSysUser() {
+        try {
+            if (!columnExistsInDb("sys_user", "username")) {
+                jdbcTemplate.execute("ALTER TABLE sys_user ADD COLUMN username VARCHAR(64) DEFAULT NULL COMMENT '登录用户名'");
+                log.info("[DBMigration] sys_user 补 username 列");
+            }
+            if (!columnExistsInDb("sys_user", "password")) {
+                jdbcTemplate.execute("ALTER TABLE sys_user ADD COLUMN password VARCHAR(128) DEFAULT NULL COMMENT '登录密码'");
+                log.info("[DBMigration] sys_user 补 password 列");
+            }
+            // 预置账号：已存在俞鹏飞则跳过；否则复用 id=1（保持历史数据归属），不存在再插入
+            Integer preset = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM sys_user WHERE username = '俞鹏飞'", Integer.class);
+            if (preset == null || preset == 0) {
+                Integer first = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM sys_user WHERE id = 1", Integer.class);
+                if (first != null && first > 0) {
+                    jdbcTemplate.update(
+                            "UPDATE sys_user SET username = '俞鹏飞', password = 'finn', nickname = '俞鹏飞' WHERE id = 1");
+                    log.info("[DBMigration] 预置账号已写入 id=1（俞鹏飞）");
+                } else {
+                    jdbcTemplate.update(
+                            "INSERT INTO sys_user(id, nickname, username, password) VALUES (1, '俞鹏飞', '俞鹏飞', 'finn')");
+                    log.info("[DBMigration] 预置账号已插入 id=1（俞鹏飞）");
+                }
+            }
+        } catch (Exception ex) {
+            log.warn("[DBMigration] sys_user 迁移失败（忽略）：{}", ex.getMessage());
+        }
+    }
+
+    /** 用 INFORMATION_SCHEMA 精确检查当前库某表某列是否存在 */
+    private boolean columnExistsInDb(String table, String column) {
+        Integer cnt = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS " +
+                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                Integer.class, table, column);
+        return cnt != null && cnt > 0;
     }
 
     /** 给 project 表补缺失字段 */

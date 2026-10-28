@@ -119,6 +119,21 @@
           </el-icon>
           <span>{{ THEME_LABEL[theme] }}</span>
         </button>
+        <!-- 当前用户：展示昵称，下拉可退出登录 -->
+        <el-dropdown class="user-chip" trigger="click" @command="onUserCommand">
+          <span class="uc-inner" title="当前登录用户">
+            <span class="uc-avatar">{{ nickname.slice(0, 1) }}</span>
+            <span class="uc-name">{{ nickname }}</span>
+            <el-icon :size="12" class="uc-caret"><ArrowDown /></el-icon>
+          </span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="logout">
+                <el-icon><SwitchButton /></el-icon>退出登录
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <!-- 告警闹铃：徽标展示当前活跃告警数量；hover 或点击弹出告警明细 -->
         <div
           class="bell"
@@ -325,13 +340,16 @@ import {
   Moon,
   Headset,
   VideoPlay,
-  VideoPause
+  VideoPause,
+  ArrowDown,
+  SwitchButton
 } from "@element-plus/icons-vue";
 import { useCustomMenus } from "@/composables/useCustomMenus";
 import { useMenuTabs } from "@/composables/useMenuTabs";
 import { useTheme } from "@/composables/useTheme";
 import { useAlerts, startAlertPolling } from "@/composables/useAlerts";
 import { usePlayer } from "@/composables/usePlayer";
+import { logout as authLogout } from "@/api/auth";
 import type { CustomMenu } from "@/api/customMenu";
 
 defineOptions({ name: "MainLayout" });
@@ -340,6 +358,32 @@ const route = useRoute();
 const router = useRouter();
 // ===== 主题切换 =====
 const { theme, toggleTheme, THEME_LABEL } = useTheme();
+
+// ===== 当前登录用户 =====
+const nickname = ref(localStorage.getItem("lifedesk-user") || "用户");
+
+/** 用户下拉命令：退出登录 */
+async function onUserCommand(cmd: string) {
+  if (cmd !== "logout") return;
+  try {
+    await ElMessageBox.confirm("确定退出登录吗？", "退出登录", {
+      confirmButtonText: "退出",
+      cancelButtonText: "取消",
+      type: "warning"
+    });
+  } catch {
+    return;
+  }
+  try {
+    await authLogout();
+  } catch {
+    // 忽略登出接口异常，本地照常清理
+  }
+  localStorage.removeItem("lifedesk-token");
+  localStorage.removeItem("lifedesk-user");
+  ElMessage.success("已退出登录");
+  router.push("/login");
+}
 
 // ===== 告警闹铃（全局单例轮询，共享给系统监控页） =====
 const { alerts, alertCount, sourceLabel, levelLabel } = useAlerts();
@@ -1015,6 +1059,54 @@ onMounted(() => {
 @keyframes np-eq-bounce {
   0%, 100% { transform: scaleY(0.4); }
   50% { transform: scaleY(1); }
+}
+
+// 当前登录用户（顶栏右侧）：头像圆点 + 昵称，下拉退出
+.user-chip {
+  margin-left: 6px;
+  flex-shrink: 0;
+
+  .uc-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 10px 4px 4px;
+    border-radius: 999px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid $border-glass;
+    transition: background 0.2s;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+  }
+
+  .uc-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    background: $accent;
+  }
+
+  .uc-name {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: $text-secondary;
+  }
+
+  .uc-caret {
+    color: $text-tertiary;
+  }
 }
 
 // 主题切换按钮：跟随主题变量自动换肤

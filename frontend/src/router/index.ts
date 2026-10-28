@@ -2,6 +2,13 @@ import { createRouter, createWebHashHistory, type RouteRecordRaw } from "vue-rou
 
 const routes: RouteRecordRaw[] = [
   {
+    // 登录/注册页（布局独立于主框架，风格与系统一致）
+    path: "/login",
+    name: "Login",
+    component: () => import("@/views/login/index.vue"),
+    meta: { title: "登录" }
+  },
+  {
     path: "/",
     component: () => import("@/layout/MainLayout.vue"),
     redirect: "/dashboard",
@@ -89,6 +96,18 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHashHistory(),
   routes
+});
+
+// ===== 登录守卫：未登录一律去 /login；已登录访问 /login 回首页 =====
+router.beforeEach((to, _from, next) => {
+  const token = localStorage.getItem("lifedesk-token");
+  if (to.path !== "/login" && !token) {
+    next("/login");
+  } else if (to.path === "/login" && token) {
+    next("/dashboard");
+  } else {
+    next();
+  }
 });
 
 export default router;
