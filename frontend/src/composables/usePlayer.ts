@@ -7,7 +7,9 @@ import { trackSrc, updateMusicDuration, type MusicTrack } from "@/api/music";
  *
  * - audio 元素在模块作用域创建，不属于任何组件 → 菜单切换/页面跳转播放不中断；
  * - MainLayout 右上角迷你展示与「我的音乐」页共享同一份状态；
- * - 播放队列：点列表播放时传入整页列表，播完自动切下一曲（循环）。
+ * - 播放队列：点列表播放时传入整页列表，播完自动切下一曲（循环），支持上一首/下一首；
+ * - 进度：timeupdate 同步 progress，页面进度条拖拽时经 seek() 跳转；
+ * - 音量：0~1，持久化 localStorage。
  */
 
 /** 当前播放曲目 */
@@ -17,6 +19,8 @@ const playing = ref(false);
 /** 进度（秒）与总时长 */
 const progress = ref(0);
 const duration = ref(0);
+/** 音量 0~1（持久化） */
+const volume = ref(parseFloat(localStorage.getItem("lifedesk-volume") || "") || 0.8);
 
 // 模块级唯一 audio 实例：生命周期与页面（SPA）一致，切菜单不会销毁
 const audio: HTMLAudioElement | null = typeof Audio !== "undefined" ? new Audio() : null;
@@ -26,6 +30,7 @@ let queue: MusicTrack[] = [];
 
 if (audio) {
   audio.preload = "metadata";
+  audio.volume = Math.min(1, Math.max(0, volume.value));
   audio.addEventListener("play", () => (playing.value = true));
   audio.addEventListener("pause", () => (playing.value = false));
   audio.addEventListener("timeupdate", () => (progress.value = audio.currentTime || 0));
@@ -38,14 +43,7 @@ if (audio) {
   });
   audio.addEventListener("ended", () => {
     // 队列循环：播完自动下一曲
-    const idx = queue.findIndex((t) => t.id === current.value?.id);
-    if (queue.length > 1) {
-      const next = queue[(idx + 1) % queue.length];
-      playTrack(next, queue);
-    } else {
-      playing.value = false;
-      progress.value = 0;
-    }
+    next();
   });
   audio.addEventListener("error", () => {
     playing.value = false;
@@ -70,6 +68,7 @@ function playTrack(track: MusicTrack, list?: MusicTrack[]) {
   }
   current.value = track;
   audio.src = trackSrc(track);
+  progress.value = 0;
   audio.play().catch(() => (playing.value = false));
 }
 
@@ -81,6 +80,56 @@ function toggle() {
   } else {
     audio.pause();
   }
+}
+
+/** 下一曲（队列循环） */
+function next() {
+  if (!audio || !queue.length) {
+    playing.value = false;
+    return;
+  }
+  const idx = queue.findIndex((t) => t.id === current.value?.id);
+  const nextTrack = queue[(idx + 1) % queue.length];
+  if (nextTrack && nextTrack.id !== current.value?.id) {
+    playTrack(nextTrack, queue);
+  } else {
+    // 队列只有一曲：从头重播
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+  }
+}
+
+/** 上一曲：播放超 3 秒先回到开头，否则切上一首（主流播放器习惯） */
+function prev() {
+  if (!audio || !current.value) return;
+  if (audio.currentTime > 3) {
+    audio.currentTime = 0;
+    return;
+  }
+  const idx = queue.findIndex((t) => t.id === current.value?.id);
+  const prevTrack = queue[(idx - 1 + queue.length) % queue.length];
+  if (prevTrack && prevTrack.id !== current.value?.id) {
+    playTrack(prevTrack, queue);
+  } else {
+    audio.currentTime = 0;
+  }
+}
+
+/** 跳转到指定秒数（进度条拖拽释放后调用） */
+function seek(sec: number) {
+  if (!audio || !current.value) return;
+  const d = isFinite(audio.duration) ? audio.duration : duration.value;
+  if (d > 0) {
+    audio.currentTime = Math.min(Math.max(0, sec), d - 0.2);
+    progress.value = audio.currentTime;
+  }
+}
+
+/** 设置音量 0~1 并持久化 */
+function setVolume(v: number) {
+  volume.value = Math.min(1, Math.max(0, v));
+  if (audio) audio.volume = volume.value;
+  localStorage.setItem("lifedesk-volume", String(volume.value));
 }
 
 /** 停止并清空当前曲目 */
@@ -96,5 +145,19 @@ function stop() {
 }
 
 export function usePlayer() {
-  return { current, playing, progress, duration, playTrack, toggle, stop };
+  return {
+    current,
+    playing,
+    progress,
+    duration,
+    volume,
+    playTrack,
+    toggle,
+    stop,
+    next,
+    prev,
+    seek,
+    setVolume,
+    hasQueue: queue.length > 0
+  };
 }

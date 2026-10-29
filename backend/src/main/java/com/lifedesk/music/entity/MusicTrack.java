@@ -43,4 +43,7 @@ public class MusicTrack extends BaseEntity {
 
     /** 时长（秒，可选） */
     private Integer durationSec;
+
+    /** 歌词（LRC 同步格式或纯文本；来自 LRCLIB 开放歌词库或手动录入） */
+    private String lyrics;
 }

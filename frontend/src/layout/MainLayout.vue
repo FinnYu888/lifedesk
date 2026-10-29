@@ -96,8 +96,9 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
+        <!-- 主题切换：深紫玻璃(glass) → 科技HUD(tech) → 奶白暖调(cream) 循环，选择持久化 localStorage -->
         <!-- 全局音乐迷你展示：播放时出现，均衡器动态 + 歌名 + 播放/暂停；
-             播放器为全局单例，切菜单不中断 -->
+             播放器为全局单例，切菜单不中断（位于主题切换旁） -->
         <div v-if="player.current" class="mini-player" :title="player.playing ? '点击暂停' : '点击播放'">
           <span class="np-eq" :class="{ paused: !player.playing }" @click="player.toggle()">
             <i /><i /><i /><i />
@@ -108,7 +109,6 @@
             <VideoPlay v-else />
           </el-icon>
         </div>
-        <!-- 主题切换：深紫玻璃(glass) → 科技HUD(tech) → 奶白暖调(cream) 循环，选择持久化 localStorage -->
         <button
           class="theme-toggle"
           :title="'当前：' + THEME_LABEL[theme] + '，点击切换下一主题'"

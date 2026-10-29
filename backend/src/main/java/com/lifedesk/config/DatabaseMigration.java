@@ -86,6 +86,20 @@ public class DatabaseMigration implements ApplicationRunner {
         fixProjectNullTimestamps();
         migrateTenantColumns();
         migrateSysUser();
+        migrateMusicLyrics();
+    }
+
+    /** music_track 补 lyrics 歌词列（LRC 同步歌词或纯文本），如缺失 */
+    private void migrateMusicLyrics() {
+        try {
+            if (!columnExistsInDb("music_track", "lyrics")) {
+                String sql = "ALTER TABLE music_track ADD COLUMN lyrics MEDIUMTEXT DEFAULT NULL COMMENT '歌词（LRC 或纯文本）'";
+                log.info("[DBMigration] music_track 补 lyrics 列");
+                jdbcTemplate.execute(sql);
+            }
+        } catch (Exception ex) {
+            log.warn("[DBMigration] music_track lyrics 迁移失败（忽略）：{}", ex.getMessage());
+        }
     }
 
     /** 给所有业务表补 user_id 列（多租户数据归属），历史数据默认归属用户 1 */

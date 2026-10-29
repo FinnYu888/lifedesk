@@ -60,6 +60,12 @@ public class MusicController {
         return R.ok(musicService.upload(file, title, artist));
     }
 
+    /** 替换曲目音频源文件（保留歌名/歌手，仅更换音频）：multipart file */
+    @PostMapping("/{id}/file")
+    public R<MusicTrack> replaceFile(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+        return R.ok(musicService.replaceFile(id, file));
+    }
+
     /** 删除曲目（软删 + 上传源文件物理删除） */
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable Long id) {
@@ -84,6 +90,19 @@ public class MusicController {
     @PostMapping("/{id}/duration")
     public R<Void> updateDuration(@PathVariable Long id, @RequestBody Map<String, Integer> body) {
         musicService.updateDuration(id, body == null ? null : body.get("durationSec"));
+        return R.ok();
+    }
+
+    /** 拉取歌词：优先已存歌词，否则从 LRCLIB 开放歌词库搜索并入库，返回 {lyrics, synced} */
+    @GetMapping("/{id}/lyrics")
+    public R<Map<String, Object>> lyrics(@PathVariable Long id) {
+        return R.ok(musicService.fetchLyrics(id));
+    }
+
+    /** 手动保存/编辑歌词：body {lyrics} */
+    @PostMapping("/{id}/lyrics")
+    public R<Void> saveLyrics(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        musicService.saveLyrics(id, body == null ? null : body.get("lyrics"));
         return R.ok();
     }
 }
