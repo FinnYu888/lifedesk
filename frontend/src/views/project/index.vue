@@ -276,9 +276,9 @@
         <div class="req-tip text-tertiary">
           来源：wetrans.cimc.cn/gateway/apiIssue/developTask/query（点击行查看详情）
         </div>
-        <!-- 鉴权过期 / 空数据提示 -->
-        <div v-if="!requirements.length && authExpired" class="req-empty-hint">
-          鉴权信息已过期，请输入最新 authorization 后点击「保存并刷新」
+        <!-- 鉴权过期 / 拉取失败提示（原因由后端网关业务码判定后透传） -->
+        <div v-if="!requirements.length && reqEmptyHint" class="req-empty-hint">
+          {{ reqEmptyHint }}
         </div>
         <el-table
           v-else
@@ -352,8 +352,8 @@
           </span>
         </div>
         <div v-if="msLoading && !milestones.length" class="m-empty-hint">正在刷新里程碑进度…</div>
-        <div v-else-if="!milestones.length && authExpired" class="m-empty-hint">
-          鉴权信息已过期，请输入最新 authorization 后点击「保存并刷新」
+        <div v-else-if="!milestones.length && msEmptyHint" class="m-empty-hint">
+          {{ msEmptyHint }}
         </div>
         <template v-else>
           <ProgressBar
@@ -729,8 +729,36 @@ let reqKeywordTimer: ReturnType<typeof setTimeout> | null = null;
 const authStatus = ref<RequirementAuthStatus | null>(null);
 const authInput = ref<string>("");
 const authSaving = ref(false);
-/** 鉴权是否已过期（developTask/query 或 sprint/query 返回 401/403 时为 true） */
+/** 鉴权是否已过期（后端解析网关业务码 401/403 后明确返回，不再靠"列表为空"猜测） */
 const authExpired = ref(false);
+/** 需求列表失败原因（后端透传网关业务异常/网络异常信息） */
+const reqRemoteError = ref<string>("");
+/** 远程拉取总条数（过滤前），用于区分"远程无数据"与"被筛选条件过滤为空" */
+const reqTotal = ref<number>(0);
+/** 当前生效的筛选关键词（用于空态提示） */
+const reqActiveKeyword = ref<string>("");
+/** 里程碑独立失败状态（与需求列表互不影响） */
+const msAuthExpired = ref(false);
+const msRemoteError = ref<string>("");
+
+/** 需求列表空态提示文案 */
+const reqEmptyHint = computed(() => {
+  if (authExpired.value) return "鉴权信息已过期（网关拒绝），请输入最新 authorization 后点击「保存并刷新」";
+  if (reqRemoteError.value) return "需求拉取失败：" + reqRemoteError.value;
+  // 远程有数据但被筛选条件（Sprint/状态/关键词）过滤为空 → 明确提示，避免误以为鉴权失败
+  if (reqTotal.value > 0 && !requirements.value.length) {
+    const kw = reqActiveKeyword.value ? `关键词「${reqActiveKeyword.value}」` : "当前筛选条件";
+    return `远程已拉取 ${reqTotal.value} 条需求，但${kw}未匹配到任何条目，可清空筛选查看全部`;
+  }
+  return "";
+});
+
+/** 里程碑空态提示文案 */
+const msEmptyHint = computed(() => {
+  if (msAuthExpired.value) return "鉴权信息已过期（网关拒绝），请输入最新 authorization 后点击「保存并刷新」";
+  if (msRemoteError.value) return "里程碑拉取失败：" + msRemoteError.value;
+  return "";
+});
 
 /** authorization 状态文案 */
 const authStatusText = computed(() => {
@@ -903,7 +931,11 @@ async function load() {
     ]);
     stat.value = s.data;
     active.value = a.data;
-    milestones.value = m.data || [];
+    // 里程碑接口返回 {list, authExpired, remoteError}
+    const msData = m.data || ({} as any);
+    milestones.value = msData.list || [];
+    msAuthExpired.value = !!msData.authExpired;
+    msRemoteError.value = msData.remoteError || "";
     commits.value = c.data;
   } catch {
     /* 拦截器已提示 */
@@ -916,14 +948,20 @@ async function load() {
 async function loadRequirements() {
   try {
     const r = await fetchRequirements(reqSprint.value, reqStatus.value, reqKeyword.value);
-    requirements.value = r.data || [];
-    // 有数据 → 鉴权未过期；无数据 → 标记为"可能鉴权过期"（让 UI 提示输入）
-    authExpired.value = requirements.value.length === 0
-      && (!authStatus.value || authStatus.value.hasEffectiveToken);
+    // 接口返回 {list, total, authExpired, remoteError}——失败原因由后端网关业务码判定，不再靠"列表为空"猜测
+    const data = r.data || ({} as any);
+    requirements.value = data.list || [];
+    authExpired.value = !!data.authExpired;
+    reqRemoteError.value = data.remoteError || "";
+    reqTotal.value = data.total || 0;
+    reqActiveKeyword.value = (reqKeyword.value || "").trim();
   } catch {
     /* 拦截器已提示 */
     requirements.value = [];
-    authExpired.value = true;
+    authExpired.value = false;
+    reqRemoteError.value = "请求失败（网络异常或登录过期），请重试";
+    reqTotal.value = 0;
+    reqActiveKeyword.value = (reqKeyword.value || "").trim();
   }
 }
 
@@ -938,15 +976,37 @@ async function onSaveAuthorization() {
   try {
     const r = await setRequirementAuthorization(token);
     authStatus.value = r.data;
-    authExpired.value = false;
     authInput.value = "";
-    ElMessage.success("authorization 已保存，正在局部刷新需求与里程碑…");
+    // 后端保存后立即探测网关校验，token 无效马上报错（不再等刷新后面对空数据猜原因）
+    if (r.data && r.data.probeValid === false) {
+      ElMessage.error(
+        "authorization 已保存，但网关校验失败：" + (r.data.probeMsg || "token 无效") +
+        "，请确认粘贴的是 wetrans 平台最新鉴权信息"
+      );
+    } else {
+      ElMessage.success("authorization 已保存并通过网关校验，正在局部刷新需求与里程碑…");
+    }
     // 先局部刷新"我的需求"（快），再刷新"里程碑进度"（慢，需多次远程调用）；两者独立提示成败
     reqLoading.value = true;
     try {
       const req = await fetchRequirements(reqSprint.value, reqStatus.value, reqKeyword.value);
-      requirements.value = req.data || [];
-      ElMessage.success(`我的需求已刷新（${requirements.value.length} 条）`);
+      const reqData = req.data || ({} as any);
+      requirements.value = reqData.list || [];
+      authExpired.value = !!reqData.authExpired;
+      reqRemoteError.value = reqData.remoteError || "";
+      reqTotal.value = reqData.total || 0;
+      reqActiveKeyword.value = (reqKeyword.value || "").trim();
+      if (reqData.authExpired) {
+        ElMessage.error("需求拉取失败：鉴权信息已被网关拒绝，请重新粘贴最新 authorization");
+      } else if (reqData.remoteError) {
+        ElMessage.warning("需求拉取失败：" + reqData.remoteError);
+      } else if (reqTotal.value > 0 && !requirements.value.length) {
+        ElMessage.warning(
+          `远程已拉取 ${reqTotal.value} 条需求，但当前筛选条件未匹配到条目，可清空搜索框/Sprint/状态筛选查看全部`
+        );
+      } else {
+        ElMessage.success(`我的需求已刷新（${requirements.value.length} 条）`);
+      }
     } catch (e: any) {
       ElMessage.error("我的需求刷新失败：" + (e?.message || "请求超时，请重试"));
     } finally {
@@ -955,7 +1015,15 @@ async function onSaveAuthorization() {
     msLoading.value = true;
     try {
       const ms = await fetchRequirementMilestones();
-      milestones.value = ms.data || [];
+      const msData = ms.data || ({} as any);
+      milestones.value = msData.list || [];
+      msAuthExpired.value = !!msData.authExpired;
+      msRemoteError.value = msData.remoteError || "";
+      if (msData.authExpired) {
+        ElMessage.warning("里程碑刷新失败：鉴权信息已被网关拒绝");
+      } else if (msData.remoteError) {
+        ElMessage.warning("里程碑刷新失败：" + msData.remoteError);
+      }
     } catch (e: any) {
       ElMessage.warning("里程碑进度刷新失败：" + (e?.message || "请求超时，可稍后重试"));
     } finally {
@@ -965,7 +1033,6 @@ async function onSaveAuthorization() {
     try {
       authStatus.value = (await getRequirementAuthStatus()).data;
     } catch { /* 状态拉取失败不影响主流程 */ }
-    authExpired.value = requirements.value.length === 0;
   } catch (e) {
     /* 拦截器已提示 */
   } finally {

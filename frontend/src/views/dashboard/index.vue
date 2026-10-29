@@ -62,7 +62,10 @@
         <!-- 2. 里程碑进度·Sprint 完成率 -->
         <div class="ld-card">
           <div class="hc-title">里程碑进度·Sprint 完成率</div>
-          <div v-if="!milestones.length" class="empty-mini text-tertiary">暂无里程碑数据</div>
+          <div v-if="!milestones.length && msAuthExpired" class="empty-mini text-tertiary">
+            鉴权信息已过期，请到「项目管理」页重新保存 authorization
+          </div>
+          <div v-else-if="!milestones.length" class="empty-mini text-tertiary">暂无里程碑数据</div>
           <ProgressBar
             v-for="m in milestones.slice(0, 4)"
             :key="m.name"
@@ -117,7 +120,10 @@
         <!-- 5. 测试用例·通过率（双租户汇总） -->
         <div class="ld-card">
           <div class="hc-title">测试用例·通过率</div>
-          <div v-if="!rptStats.length" class="empty-mini text-tertiary">加载中...</div>
+          <div v-if="rptState === 'loading'" class="empty-mini text-tertiary">加载中...</div>
+          <div v-else-if="rptState === 'error' && !rptStats.length" class="empty-mini text-tertiary rpt-retry" @click="loadRptStats">
+            加载失败，点击重试
+          </div>
           <div v-for="t in rptStats" :key="t.tenantId" class="rpt-sum">
             <div class="rpt-sum-head">
               <span class="rpt-sum-name">{{ (t.tenantName || `租户${t.tenantId}`).replace(/堆场$/, "") }}</span>
@@ -161,25 +167,33 @@
     <div class="health-section">
       <div class="section-head">
         <span class="section-title">个人健康</span>
-        <span class="section-note">{{ dateStr }} · 本周达成率 82% · 目标 65kg</span>
+        <span class="section-note">{{ dateStr }} · 本周达成率 {{ healthOv?.stat?.week_rate ?? 0 }}% · 目标 {{ healthOv?.stat?.weight_target ?? 65 }}kg</span>
       </div>
 
       <div class="health-grid">
         <div class="ld-card">
           <div class="hc-title">健身动作·本周完成</div>
           <div class="hc-flex">
-            <RingChart :percent="71" :size="100" />
+            <RingChart :percent="workoutWeekPercent" :size="100" />
             <div class="hc-detail">
-              <div class="detail-row"><span>胸</span><StatusBadge type="positive">4/4 已完成</StatusBadge></div>
-              <div class="detail-row"><span>背</span><StatusBadge type="positive">4/4 已完成</StatusBadge></div>
-              <div class="detail-row"><span>腿</span><StatusBadge type="warning">3/5 待升级</StatusBadge></div>
+              <div v-for="p in workoutPartRows" :key="p.part" class="detail-row">
+                <span>{{ p.part }}</span>
+                <StatusBadge :type="p.done >= p.plan ? 'positive' : 'warning'">
+                  {{ p.done }}/{{ p.plan }} 组
+                </StatusBadge>
+              </div>
+              <div v-if="!workoutPartRows.length" class="text-tertiary" style="font-size: 12px">
+                本周暂无运动记录，可在「个人健康」页录入
+              </div>
             </div>
           </div>
         </div>
 
         <div class="ld-card">
           <div class="hc-title">饮食控制·每周打卡</div>
-          <div class="dots"><span v-for="n in 7" :key="n" class="dot" :class="n <= 5 ? 'on' : ''" /></div>
+          <div class="dots">
+            <span v-for="n in 7" :key="n" class="dot" :class="dietCheckDays.has(n) ? 'on' : ''" />
+          </div>
           <div class="diet-today">
             <span class="meal" @click="quickMeal('早')">早</span>
             <span class="meal" @click="quickMeal('午')">午</span>
@@ -258,7 +272,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import VChart from "vue-echarts";
@@ -298,6 +312,8 @@ const projStat = ref<any>(null);
 const projActive = ref<any[]>([]);
 const projCommits = ref<any[]>([]);
 const milestones = ref<RequirementMilestone[]>([]);
+/** 里程碑鉴权是否过期（后端解析网关业务码后透传） */
+const msAuthExpired = ref(false);
 const requirements = ref<Requirement[]>([]);
 // 测试用例·通过率（双租户汇总）
 const rptStats = ref<RptTenantPassRate[]>([]);
@@ -330,6 +346,48 @@ const waterPercent = computed(() =>
 const intakeToday = computed(() => healthOv.value?.today_summary?.intake_today ?? 0);
 const burnToday = computed(() => healthOv.value?.today_summary?.burn_today ?? 0);
 const netToday = computed(() => intakeToday.value - burnToday.value);
+
+/** 健身动作·本周完成：真实聚合 workout_record 近 7 天（按部位汇总计划组数/完成组数） */
+const workoutPartRows = computed(() => {
+  const map = new Map<string, { part: string; plan: number; done: number }>();
+  for (const w of healthOv.value?.workouts || []) {
+    const part = w.part || w.exerciseName || "其他";
+    const row = map.get(part) || { part, plan: 0, done: 0 };
+    // planCount/doneCount 有值按其累计；否则按实际组数累计（plan 取组数，done 取组数→视为完成）
+    if (w.planCount != null || w.doneCount != null) {
+      row.plan += w.planCount ?? 0;
+      row.done += w.doneCount ?? 0;
+    } else {
+      row.plan += w.sets ?? 0;
+      row.done += w.sets ?? 0;
+    }
+    map.set(part, row);
+  }
+  return [...map.values()].sort((a, b) => b.done - a.done).slice(0, 4);
+});
+const workoutWeekPercent = computed(() => {
+  const rows = workoutPartRows.value;
+  const plan = rows.reduce((s, r) => s + r.plan, 0);
+  const done = rows.reduce((s, r) => s + r.done, 0);
+  return plan > 0 ? Math.min(100, Math.round((done / plan) * 100)) : 0;
+});
+
+/** 饮食控制·本周打卡：真实 diet_check 数据，映射为本周一~周日（1~7）中有打卡的天集合 */
+const dietCheckDays = computed(() => {
+  const days = new Set<number>();
+  const now = new Date();
+  // 本周一 0 点
+  const monday = new Date(now);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  for (const d of healthOv.value?.diet || []) {
+    if (!(d.breakfast || d.lunch || d.dinner || d.snack)) continue;
+    const dt = new Date(d.checkDate);
+    if (isNaN(dt.getTime()) || dt < monday || dt > now) continue;
+    days.add(Math.floor((dt.getTime() - monday.getTime()) / 86400000) + 1);
+  }
+  return days;
+});
 
 /** 静态运动计划达成率（exercise_plan 表） */
 const exercisePlanBars = computed(() =>
@@ -373,6 +431,12 @@ async function loadHealth() {
   } catch {
     /* 拦截器已提示 */
   }
+}
+
+// ===== 健康数据实时刷新：健康页录入/改目标后派发 health-updated 事件 → 首页立即重拉 =====
+let healthTimer: ReturnType<typeof setInterval> | null = null;
+function onHealthChanged() {
+  loadHealth();
 }
 
 const dateStr =
@@ -464,12 +528,15 @@ function rptSumRateCls(t: RptTenantPassRate): string {
   return "text-danger";
 }
 /** 加载双租户用例通过率（独立加载，避免 RPT 慢拖累首页主数据） */
+const rptState = ref<"loading" | "ok" | "error">("loading");
 async function loadRptStats() {
+  rptState.value = "loading";
   try {
     const res = await fetchRptPassRate();
     rptStats.value = res.data || [];
+    rptState.value = "ok";
   } catch {
-    /* 拦截器已提示 */
+    rptState.value = "error";
   }
 }
 
@@ -525,13 +592,21 @@ async function loadAll() {
   } catch {
     // 错误已由拦截器提示
   }
-  // 里程碑 + 我的需求：独立加载，避免远程接口超时阻塞首页
+  // 里程碑 + 我的需求：独立加载，避免远程接口超时阻塞首页。
+  // 接口返回 {list, authExpired, remoteError} 元信息结构（与需求页一致），取 list 渲染
   Promise.allSettled([
     fetchRequirementMilestones(),
     fetchRequirements()
   ]).then(([ms, req]) => {
-    if (ms.status === "fulfilled") milestones.value = ms.value.data || [];
-    if (req.status === "fulfilled") requirements.value = req.value.data || [];
+    if (ms.status === "fulfilled") {
+      const md: any = ms.value.data || {};
+      milestones.value = md.list || [];
+      msAuthExpired.value = !!md.authExpired;
+    }
+    if (req.status === "fulfilled") {
+      const rd: any = req.value.data || {};
+      requirements.value = rd.list || [];
+    }
   });
 }
 
@@ -540,42 +615,76 @@ async function quickMeal(meal: string) {
     const key = meal === "早" ? "breakfast" : meal === "午" ? "lunch" : meal === "晚" ? "dinner" : "snack";
     await recordHealth({ recordType: "diet", [key]: true });
     ElMessage.success(`${meal}已打卡`);
+    // 通知布局"今日健康"迷你卡同步刷新（打卡数据与健康页同源）
+    window.dispatchEvent(new CustomEvent("health-updated"));
   } catch {
     // 错误已提示
   }
 }
 
-const weightChartOption = computed(() => ({
-  tooltip: { trigger: "axis" },
-  grid: { left: 30, right: 12, top: 10, bottom: 22 },
-  xAxis: {
-    type: "category",
-    data: ["10.19", "10.20", "10.21", "10.22", "10.23", "10.24"],
-    axisLabel: { color: "#a8a0c8", fontSize: 10 }
-  },
-  yAxis: {
-    type: "value",
-    min: 65,
-    max: 66,
-    axisLabel: { color: "#a8a0c8", fontSize: 10 }
-  },
-  series: [
-    {
-      data: [65.8, 65.7, 65.6, 65.5, 65.3, 65.2],
-      type: "line",
-      smooth: true,
-      symbol: "circle",
-      symbolSize: 6,
-      lineStyle: { color: "#a78bfa", width: 2 },
-      itemStyle: { color: "#a78bfa" }
-    }
-  ]
-}));
+/** 体重·体脂变化趋势：真实数据（health overview 的 weight 列表 = weight_record 近 30 天，健康页保存身体指标后镜像同步） */
+const weightChartOption = computed(() => {
+  const list = (healthOv.value?.weight || []).filter((w: any) => w.weight != null);
+  const dates = list.map((w: any) => (w.recordDate || "").substring(5));
+  const ws = list.map((w: any) => w.weight);
+  const fs = list.map((w: any) => (w.fatRate != null ? w.fatRate : null));
+  const fsVals = fs.filter((v: any) => v != null);
+  // y 轴自适应范围（无数据用默认区间）
+  const minW = ws.length ? Math.floor(Math.min(...ws) * 10) / 10 - 0.5 : 60;
+  const maxW = ws.length ? Math.ceil(Math.max(...ws) * 10) / 10 + 0.5 : 70;
+  const minF = fsVals.length ? Math.floor(Math.min(...fsVals)) - 1 : 15;
+  const maxF = fsVals.length ? Math.ceil(Math.max(...fsVals)) + 1 : 25;
+  return {
+    tooltip: { trigger: "axis" },
+    legend: { data: ["体重", "体脂率"], textStyle: { color: "#a8a0c8", fontSize: 10 }, top: 0 },
+    grid: { left: 36, right: 36, top: 24, bottom: 22 },
+    xAxis: {
+      type: "category",
+      data: dates,
+      axisLabel: { color: "#a8a0c8", fontSize: 10 }
+    },
+    yAxis: [
+      { type: "value", min: minW, max: maxW, axisLabel: { color: "#a8a0c8", fontSize: 10 } },
+      { type: "value", min: minF, max: maxF, axisLabel: { color: "#a8a0c8", fontSize: 10 }, splitLine: { show: false } }
+    ],
+    series: [
+      {
+        name: "体重",
+        data: ws,
+        type: "line",
+        smooth: true,
+        symbol: "circle",
+        symbolSize: 6,
+        lineStyle: { color: "#a78bfa", width: 2 },
+        itemStyle: { color: "#a78bfa" }
+      },
+      {
+        name: "体脂率",
+        data: fs,
+        type: "line",
+        yAxisIndex: 1,
+        smooth: true,
+        symbol: "circle",
+        symbolSize: 5,
+        lineStyle: { color: "#2dd4bf", width: 2 },
+        itemStyle: { color: "#2dd4bf" }
+      }
+    ]
+  };
+});
 
 onMounted(() => {
   loadAll();
   loadRptStats();
   loadHealth();
+  // 健康数据实时刷新：事件（健康页保存后即时刷新）+ 60s 轮询兜底
+  window.addEventListener("health-updated", onHealthChanged);
+  healthTimer = setInterval(loadHealth, 60000);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("health-updated", onHealthChanged);
+  if (healthTimer) clearInterval(healthTimer);
 });
 </script>
 
@@ -867,6 +976,10 @@ onMounted(() => {
   font-size: 12px;
   text-align: center;
   padding: 16px 0;
+}
+.rpt-retry {
+  cursor: pointer;
+  &:hover { color: $accent-light; }
 }
 .hc-title {
   font-size: 14px;

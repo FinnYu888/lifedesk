@@ -315,6 +315,69 @@ public class MusicService {
         }
     }
 
+    /**
+     * 代理外链音频流：服务端转发外部 URL 的音频给浏览器（透传 Range 请求/响应头）。
+     *
+     * <p>背景：浏览器直连外部音频源受本机网络代理/拦截影响经常加载失败，
+     * 而服务端出网可达；统一走后端代理后浏览器只需访问本服务，播放不再受外部网络影响。</p>
+     */
+    public void proxyStream(String urlStr, javax.servlet.http.HttpServletRequest request,
+                            javax.servlet.http.HttpServletResponse response) {
+        java.net.HttpURLConnection conn = null;
+        try {
+            conn = (java.net.HttpURLConnection) new java.net.URL(urlStr).openConnection();
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(60000);
+            conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36");
+            String range = request.getHeader("Range");
+            if (range != null && !range.isEmpty()) {
+                conn.setRequestProperty("Range", range);
+            }
+            int code = conn.getResponseCode();
+            response.setStatus(code);
+            String ct = conn.getContentType();
+            if (ct != null && !ct.isEmpty()) {
+                response.setContentType(ct);
+            }
+            long len = conn.getContentLengthLong();
+            if (len >= 0 && len <= Integer.MAX_VALUE) {
+                response.setContentLength((int) len);
+            }
+            String acceptRanges = conn.getHeaderField("Accept-Ranges");
+            if (acceptRanges != null) {
+                response.setHeader("Accept-Ranges", acceptRanges);
+            }
+            String contentRange = conn.getHeaderField("Content-Range");
+            if (contentRange != null) {
+                response.setHeader("Content-Range", contentRange);
+            }
+            java.io.InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            if (in == null) {
+                if (!response.isCommitted()) {
+                    response.sendError(502, "上游音频源无响应");
+                }
+                return;
+            }
+            byte[] buf = new byte[8192];
+            java.io.OutputStream out = response.getOutputStream();
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                out.write(buf, 0, n);
+            }
+            out.flush();
+        } catch (Exception e) {
+            log.warn("[Music] 代理外链音频失败：{} - {}", urlStr, e.getMessage());
+            if (!response.isCommitted()) {
+                response.setStatus(502);
+            }
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
     private String extOf(String name) {
         int dot = name == null ? -1 : name.lastIndexOf('.');
         return dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);

@@ -27,4 +27,7 @@ public class StepRecord extends BaseEntity {
     private Integer steps;
 
     private Integer goal;
+
+    /** 步数折算消耗 kcal = steps × 体重(kg) × 0.0005（录入步数时后端自动计算并同步 calorie_record） */
+    private Double calories;
 }

@@ -73,17 +73,26 @@ public class MusicController {
         return R.ok();
     }
 
-    /** 流式输出上传的音频文件（全局播放器播放地址） */
+    /**
+     * 流式输出音频（全局播放器播放地址）。
+     * 外链曲目：由后端代理转发外部音频流（浏览器不直连外部源，规避网络拦截）；
+     * 上传曲目：输出本地文件。
+     */
     @GetMapping("/{id}/file")
-    public ResponseEntity<InputStreamResource> file(@PathVariable Long id) throws IOException {
+    public void file(@PathVariable Long id,
+                     javax.servlet.http.HttpServletRequest request,
+                     javax.servlet.http.HttpServletResponse response) throws IOException {
         MusicTrack track = musicService.get(id);
+        if ("link".equals(track.getSourceType()) && track.getUrl() != null && !track.getUrl().isEmpty()) {
+            musicService.proxyStream(track.getUrl(), request, response);
+            return;
+        }
         Path path = musicService.resolveFile(track);
-        InputStream in = Files.newInputStream(path);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.parseMediaType(musicService.contentTypeOf(path.getFileName().toString())));
-        headers.setContentLength(Files.size(path));
-        headers.set("Accept-Ranges", "bytes");
-        return new ResponseEntity<>(new InputStreamResource(in), headers, org.springframework.http.HttpStatus.OK);
+        response.setContentType(musicService.contentTypeOf(path.getFileName().toString()));
+        response.setContentLength((int) Files.size(path));
+        response.setHeader("Accept-Ranges", "bytes");
+        Files.copy(path, response.getOutputStream());
+        response.getOutputStream().flush();
     }
 
     /** 回填曲目时长（秒）：body {durationSec} */

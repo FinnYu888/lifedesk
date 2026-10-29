@@ -268,14 +268,16 @@ public class RequirementService {
      * @param token 最新 JWT（不带 Bearer 前缀）；传 null 或空字符串则清空动态 token
      */
     public void setAuthorization(String token) {
-        if (token == null || token.isEmpty()) {
+        String cleaned = sanitizeToken(token);
+        if (cleaned == null) {
             currentToken.set(null);
             saveTokenToFile(null);
             log.info("动态 authorization 已清空（含持久化文件）");
         } else {
-            currentToken.set(token);
-            saveTokenToFile(token);
-            log.info("动态 authorization 已更新并持久化（长度 {}）", token.length());
+            currentToken.set(cleaned);
+            saveTokenToFile(cleaned);
+            log.info("动态 authorization 已更新并持久化（原始长度 {}，清洗后长度 {}）",
+                    token.length(), cleaned.length());
         }
     }
 
@@ -303,40 +305,84 @@ public class RequirementService {
     }
 
     /**
-     * 我的需求列表。
-     *
-     * <p>远程启用且调用成功时返回远程数据；鉴权失败（401/403）或远程不可达时返回空列表
-     * （由前端展示"鉴权信息已过期，请输入最新 authorization"提示）。</p>
+     * 我的需求列表（兼容入口）。
      *
      * @param sprint  可选 sprint 过滤，传 {@code CDS20261025} 只返回该 sprint 下需求
      * @param status  可选任务状态过滤：todo/doing/done/cancel
      * @param keyword 可选，按 task_detail / topic / product / tester 模糊匹配
      */
     public List<Requirement> list(String sprint, String status, String keyword) {
+        @SuppressWarnings("unchecked")
+        List<Requirement> data = (List<Requirement>) listWithMeta(sprint, status, keyword).get("list");
+        return data;
+    }
+
+    /**
+     * 我的需求列表（带失败原因元信息）。
+     *
+     * <p>返回 Map：{@code list=需求列表(过滤后), total=远程拉取总条数(过滤前), authExpired=鉴权是否过期,
+     * remoteError=失败原因(无失败为 null), source=数据来源(local/remote)}。
+     * 前端据此展示准确原因（"鉴权过期请重新输入" / "远程接口异常 xxx" / "被筛选条件过滤为空"），不再靠"列表为空"猜测。</p>
+     *
+     * <p>远程启用且调用成功时返回远程数据；鉴权过期（网关业务码 401/403 或 HTTP 401/403）
+     * 或远程不可达时返回空列表 + 对应原因。</p>
+     */
+    public Map<String, Object> listWithMeta(String sprint, String status, String keyword) {
+        Map<String, Object> meta = new LinkedHashMap<>();
         String token = getEffectiveToken();
-        if (remoteEnabled && token != null && !token.isEmpty()) {
-            try {
-                List<Requirement> remote = fetchFromRemote();
-                if (remote != null && !remote.isEmpty()) {
-                    // 远程数据成功拉取后，做内存过滤（远程接口入参不含 sprint/status/keyword 维度）
-                    return filterRemote(remote, sprint, status, keyword);
-                }
-                // 鉴权失败/远程返回空：返回空列表（前端展示空状态，不报错）
-                return new ArrayList<>();
-            } catch (AuthExpiredException e) {
-                // 鉴权过期：明确返回空，前端展示"鉴权过期"提示
-                log.warn("我的需求：鉴权信息已过期，返回空列表");
-                return new ArrayList<>();
-            } catch (Exception e) {
-                log.warn("调用远程需求接口失败，返回空列表：{}", e.getMessage());
-                return new ArrayList<>();
-            }
-        }
-        // 未配置 token：返回空列表，前端展示"请输入 authorization"
         if (!remoteEnabled) {
-            return queryLocal(sprint, status, keyword);
+            List<Requirement> localList = queryLocal(sprint, status, keyword);
+            meta.put("list", localList);
+            meta.put("total", localList.size());
+            meta.put("authExpired", false);
+            meta.put("remoteError", null);
+            meta.put("source", "local");
+            return meta;
         }
-        return new ArrayList<>();
+        if (token == null || token.isEmpty()) {
+            meta.put("list", new ArrayList<Requirement>());
+            meta.put("total", 0);
+            meta.put("authExpired", false);
+            meta.put("remoteError", "未设置 authorization，请输入最新鉴权信息");
+            meta.put("source", "remote");
+            return meta;
+        }
+        try {
+            List<Requirement> remote = fetchFromRemote();
+            if (remote == null) {
+                meta.put("list", new ArrayList<Requirement>());
+                meta.put("total", 0);
+                meta.put("authExpired", false);
+                meta.put("remoteError", "远程需求接口调用失败（网络异常或返回结构未识别）");
+            } else {
+                // total = 过滤前条数；前端据此区分"远程无数据"与"被筛选条件（关键词/Sprint/状态）过滤为空"
+                meta.put("total", remote.size());
+                // 远程数据成功拉取后，做内存过滤（远程接口入参不含 sprint/status/keyword 维度）
+                meta.put("list", filterRemote(remote, sprint, status, keyword));
+                meta.put("authExpired", false);
+                meta.put("remoteError", null);
+            }
+        } catch (AuthExpiredException e) {
+            log.warn("我的需求：鉴权信息已过期：{}", e.getMessage());
+            meta.put("list", new ArrayList<Requirement>());
+            meta.put("total", 0);
+            meta.put("authExpired", true);
+            meta.put("remoteError", e.getMessage());
+        } catch (RemoteBizException e) {
+            log.warn("我的需求：远程接口业务异常：{}", e.getMessage());
+            meta.put("list", new ArrayList<Requirement>());
+            meta.put("total", 0);
+            meta.put("authExpired", false);
+            meta.put("remoteError", e.getMessage());
+        } catch (Exception e) {
+            log.warn("调用远程需求接口失败：{}", e.getMessage());
+            meta.put("list", new ArrayList<Requirement>());
+            meta.put("total", 0);
+            meta.put("authExpired", false);
+            meta.put("remoteError", "远程接口调用异常：" + e.getMessage());
+        }
+        meta.put("source", "remote");
+        return meta;
     }
 
     /**
@@ -351,7 +397,151 @@ public class RequirementService {
     }
 
     /**
-     * 里程碑进度：按 sprint 聚合（依据 issue/query 接口的 status=CLOSED 统计）。
+     * 自定义异常：远程网关业务异常（success=false 但非鉴权问题）。
+     * 与 AuthExpiredException 区分，便于前端展示准确失败原因。
+     */
+    public static class RemoteBizException extends RuntimeException {
+        public RemoteBizException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * 校验 wetrans 网关统一响应外壳：{@code {code, msg, success, data}}。
+     *
+     * <p><b>关键（实测确认）</b>：网关对无效/过期 token 返回的是 <b>HTTP 200</b> +
+     * 响应体 {@code {"code":"401","msg":"服务异常","data":null}}，而非 HTTP 401。
+     * 因此仅凭 HTTP 状态码永远检测不到鉴权失败，必须解析业务码。</p>
+     *
+     * <ul>
+     *   <li>code = 401/403（或 success=false 且 code 为鉴权类）→ 抛 {@link AuthExpiredException}</li>
+     *   <li>success=false 且其他 code → 抛 {@link RemoteBizException}（携带 msg）</li>
+     *   <li>正常（code=100000 / success=true）→ 返回 root 节点</li>
+     * </ul>
+     */
+    private JsonNode checkGatewayEnvelope(String body) {
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(body);
+        } catch (Exception e) {
+            throw new RemoteBizException("响应不是有效 JSON：" + (body == null ? "null" : body.length() + "字符"));
+        }
+        String code = root.has("code") && !root.get("code").isNull() ? root.get("code").asText("") : "";
+        boolean success = root.has("success") && !root.get("success").isNull() ? root.get("success").asBoolean(true) : true;
+        String msg = root.has("msg") && !root.get("msg").isNull() ? root.get("msg").asText("") : "";
+        if ("401".equals(code) || "403".equals(code)) {
+            throw new AuthExpiredException("网关返回业务码 " + code + (msg.isEmpty() ? "" : "（" + msg + "）") + "，鉴权信息已过期");
+        }
+        if (!success && !"100000".equals(code)) {
+            throw new RemoteBizException("code=" + code + (msg.isEmpty() ? "" : "，msg=" + msg));
+        }
+        return root;
+    }
+
+    /**
+     * 保存鉴权信息前的清洗：去首尾空白、去掉粘贴时可能带上的 Bearer 前缀（大小写不敏感、可重复）、
+     * 去首尾成对引号。网关要求 Authorization 直接放 JWT（带 Bearer 反而被拒）。
+     */
+    private String sanitizeToken(String raw) {
+        if (raw == null) return null;
+        String t = raw.trim();
+        while (t.toLowerCase().startsWith("bearer ")) {
+            t = t.substring(7).trim();
+        }
+        if (t.length() >= 2
+                && ((t.startsWith("\"") && t.endsWith("\"")) || (t.startsWith("'") && t.endsWith("'")))) {
+            t = t.substring(1, t.length() - 1).trim();
+        }
+        return t.isEmpty() ? null : t;
+    }
+
+    /**
+     * 用当前生效 token 轻量探测网关鉴权是否有效（POST developTask/query，pageSize=1）。
+     * 供"保存 authorization"接口立即校验，让用户马上知道粘贴的 token 对不对。
+     *
+     * @return {hasToken:bool, valid:bool, msg:String}
+     */
+    public Map<String, Object> probeToken() {
+        Map<String, Object> r = new LinkedHashMap<>();
+        String token = getEffectiveToken();
+        boolean hasToken = token != null && !token.isEmpty();
+        r.put("hasToken", hasToken);
+        if (!hasToken) {
+            r.put("valid", false);
+            r.put("msg", "未设置 authorization");
+            return r;
+        }
+        HttpURLConnection conn = null;
+        try {
+            Map<String, Object> payload = buildRemotePayload();
+            payload.put("pageSize", 1); // 探测用最小页
+            String bodyJson = objectMapper.writeValueAsString(payload);
+            URL url = new URL(remoteUrl);
+            conn = (HttpURLConnection) url.openConnection();
+            if (conn instanceof HttpsURLConnection) {
+                HttpsURLConnection https = (HttpsURLConnection) conn;
+                https.setSSLSocketFactory(SSL_TRUST_ALL_FACTORY);
+                https.setHostnameVerifier((hostname, session) -> true);
+            }
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setRequestProperty("Authorization", token);
+            conn.setRequestProperty("Accept", "application/json");
+            conn.setRequestProperty("Connection", "close");
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(20000);
+            conn.setDoOutput(true);
+            conn.setInstanceFollowRedirects(false);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(bodyJson.getBytes(StandardCharsets.UTF_8));
+                os.flush();
+            }
+            int status = conn.getResponseCode();
+            if (isAuthError(status)) {
+                r.put("valid", false);
+                r.put("msg", "网关 HTTP " + status + "，鉴权信息已过期");
+                return r;
+            }
+            if (status != 200) {
+                r.put("valid", false);
+                r.put("msg", "网关 HTTP " + status + "，校验失败");
+                return r;
+            }
+            String body = readStream(conn);
+            checkGatewayEnvelope(body);
+            r.put("valid", true);
+            r.put("msg", "网关校验通过");
+            return r;
+        } catch (AuthExpiredException | RemoteBizException e) {
+            r.put("valid", false);
+            r.put("msg", e.getMessage());
+            return r;
+        } catch (java.net.UnknownHostException | java.net.ConnectException e) {
+            r.put("valid", false);
+            r.put("msg", "网关不可达：" + e.getMessage());
+            return r;
+        } catch (Exception e) {
+            r.put("valid", false);
+            r.put("msg", e.getClass().getSimpleName() + ": " + e.getMessage());
+            return r;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * 里程碑进度（兼容入口）。
+     */
+    public List<Milestone> listMilestones() {
+        @SuppressWarnings("unchecked")
+        List<Milestone> data = (List<Milestone>) listMilestonesWithMeta().get("list");
+        return data;
+    }
+
+    /**
+     * 里程碑进度（带失败原因元信息）：按 sprint 聚合（依据 issue/query 接口的 status=CLOSED 统计）。
+     *
+     * <p>返回 Map：{@code list=里程碑列表, authExpired=鉴权是否过期, remoteError=失败原因(无失败为 null)}。</p>
      *
      * <p>计算流程：
      * <ol>
@@ -362,32 +552,47 @@ public class RequirementService {
      *   <li>按 status=CLOSED 计算完成率 = 完成 / 总数 * 100</li>
      * </ol>
      * </p>
-     *
-     * <p>鉴权失败（401/403）或远程不可达时返回空列表，前端展示空状态而非接口报错。</p>
      */
-    public List<Milestone> listMilestones() {
+    public Map<String, Object> listMilestonesWithMeta() {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("authExpired", false);
+        meta.put("remoteError", null);
+
         String token = getEffectiveToken();
-        if (!remoteEnabled || token == null || token.isEmpty()) {
-            if (!remoteEnabled) {
-                return buildMilestonesFromLocal();
-            }
-            return new ArrayList<>();
+        if (!remoteEnabled) {
+            meta.put("list", buildMilestonesFromLocal());
+            return meta;
+        }
+        if (token == null || token.isEmpty()) {
+            meta.put("list", new ArrayList<Milestone>());
+            meta.put("remoteError", "未设置 authorization，请输入最新鉴权信息");
+            return meta;
         }
 
         // 1) 拉取当前用户的需求列表，提取唯一 sprint 列表
         List<Requirement> userReqs;
         try {
             userReqs = fetchFromRemote();
-            if (userReqs == null || userReqs.isEmpty()) {
-                // 远程返回空（含鉴权失败）：返回空里程碑列表
-                return new ArrayList<>();
-            }
         } catch (AuthExpiredException e) {
-            log.warn("里程碑：鉴权信息已过期，返回空列表");
-            return new ArrayList<>();
+            log.warn("里程碑：鉴权信息已过期：{}", e.getMessage());
+            meta.put("list", new ArrayList<Milestone>());
+            meta.put("authExpired", true);
+            meta.put("remoteError", e.getMessage());
+            return meta;
         } catch (Exception e) {
-            log.warn("里程碑：拉取用户需求失败，返回空列表：{}", e.getMessage());
-            return new ArrayList<>();
+            log.warn("里程碑：拉取用户需求失败：{}", e.getMessage());
+            meta.put("list", new ArrayList<Milestone>());
+            meta.put("remoteError", "远程接口调用异常：" + e.getMessage());
+            return meta;
+        }
+        if (userReqs == null) {
+            meta.put("list", new ArrayList<Milestone>());
+            meta.put("remoteError", "远程需求接口调用失败（网络异常或返回结构未识别）");
+            return meta;
+        }
+        if (userReqs.isEmpty()) {
+            meta.put("list", new ArrayList<Milestone>());
+            return meta;
         }
 
         // 提取唯一 sprint 列表（保持顺序）
@@ -398,7 +603,10 @@ public class RequirementService {
                 uniqueSprints.add(sp);
             }
         }
-        if (uniqueSprints.isEmpty()) return new ArrayList<>();
+        if (uniqueSprints.isEmpty()) {
+            meta.put("list", new ArrayList<Milestone>());
+            return meta;
+        }
 
         // 2) 拉取所有 sprint 列表，构造 sprintName → sprintId 映射
         Map<String, String> sprintNameToId = new HashMap<>();
@@ -412,11 +620,16 @@ public class RequirementService {
                 }
             }
         } catch (AuthExpiredException e) {
-            log.warn("里程碑：sprint/query 鉴权失败，返回空列表");
-            return new ArrayList<>();
+            log.warn("里程碑：sprint/query 鉴权失败：{}", e.getMessage());
+            meta.put("list", new ArrayList<Milestone>());
+            meta.put("authExpired", true);
+            meta.put("remoteError", e.getMessage());
+            return meta;
         } catch (Exception e) {
-            log.warn("里程碑：sprint/query 调用失败，返回空列表：{}", e.getMessage());
-            return new ArrayList<>();
+            log.warn("里程碑：sprint/query 调用失败：{}", e.getMessage());
+            meta.put("list", new ArrayList<Milestone>());
+            meta.put("remoteError", "sprint/query 调用失败：" + e.getMessage());
+            return meta;
         }
 
         // 3) 对每个唯一 sprint，调用 issue/query 拿到该 sprint 下所有 issue，按 status=CLOSED 聚合
@@ -447,17 +660,18 @@ public class RequirementService {
                 m.setDueDate(parseSprintDate(sprintName));
                 result.add(m);
             } catch (AuthExpiredException e) {
-                log.warn("里程碑：issue/query?sprintIds={} 鉴权失败，跳过该 sprint", sprintId);
-                continue;
+                log.warn("里程碑：issue/query?sprintIds={} 鉴权失败，跳过该 sprint：{}", sprintId, e.getMessage());
+                meta.put("authExpired", true);
+                if (meta.get("remoteError") == null) meta.put("remoteError", e.getMessage());
             } catch (Exception e) {
                 log.warn("里程碑：issue/query?sprintIds={} 调用失败，跳过：{}", sprintId, e.getMessage());
-                continue;
             }
         }
 
         // 按 sprint 倒序（CDS20261025 在最前）
         result.sort((a, b) -> b.getName().compareTo(a.getName()));
-        return result;
+        meta.put("list", result);
+        return meta;
     }
 
     /** 本地 mock 数据聚合里程碑（仅当 remoteEnabled=false 时使用） */
@@ -561,7 +775,9 @@ public class RequirementService {
             String body = readStream(conn);
             log.debug("sprint/query 响应：bodyLen={}", body.length());
 
-            return parseSprints(body);
+            // 网关外壳校验：HTTP 200 也可能携带业务码 401（token 过期）
+            JsonNode root = checkGatewayEnvelope(body);
+            return parseSprints(root);
         } catch (AuthExpiredException e) {
             throw e;
         } catch (java.net.UnknownHostException | java.net.ConnectException e) {
@@ -575,11 +791,10 @@ public class RequirementService {
         }
     }
 
-    /** 解析 sprint/query 返回 JSON 为 SprintInfo 列表 */
+    /** 解析 sprint/query 返回 JSON 为 SprintInfo 列表（root 已过网关外壳校验） */
     @SuppressWarnings("unchecked")
-    private List<SprintInfo> parseSprints(String body) {
+    private List<SprintInfo> parseSprints(JsonNode root) {
         try {
-            JsonNode root = objectMapper.readTree(body);
             JsonNode data = root.get("data");
             if (data == null) return null;
             JsonNode list;
@@ -660,7 +875,9 @@ public class RequirementService {
             String body = readStream(conn);
             log.debug("issue/query 响应：sprintId={}, bodyLen={}", sprintId, body.length());
 
-            return parseIssues(body);
+            // 网关外壳校验：HTTP 200 也可能携带业务码 401（token 过期）
+            JsonNode root = checkGatewayEnvelope(body);
+            return parseIssues(root);
         } catch (AuthExpiredException e) {
             throw e;
         } catch (java.net.UnknownHostException | java.net.ConnectException e) {
@@ -674,11 +891,10 @@ public class RequirementService {
         }
     }
 
-    /** 解析 issue/query 返回 JSON 为 IssueInfo 列表 */
+    /** 解析 issue/query 返回 JSON 为 IssueInfo 列表（root 已过网关外壳校验） */
     @SuppressWarnings("unchecked")
-    private List<IssueInfo> parseIssues(String body) {
+    private List<IssueInfo> parseIssues(JsonNode root) {
         try {
-            JsonNode root = objectMapper.readTree(body);
             JsonNode data = root.get("data");
             if (data == null) return null;
             JsonNode list;
@@ -773,7 +989,9 @@ public class RequirementService {
             log.debug("远程需求接口响应：bodyLen={}, 前500字符={}", body.length(),
                     body.length() > 500 ? body.substring(0, 500) : body);
 
-            return parseRemoteResponse(body);
+            // 网关外壳校验：HTTP 200 也可能携带业务码 401（token 过期，实测 {"code":"401","msg":"服务异常"}）
+            JsonNode root = checkGatewayEnvelope(body);
+            return parseRemoteResponse(root);
         } catch (AuthExpiredException e) {
             // 鉴权失败：向上抛，让调用方（list / listMilestones）返回空列表，前端展示"鉴权过期"提示
             throw e;
@@ -948,9 +1166,8 @@ public class RequirementService {
      * <p>list 元素字段做兜底映射：尝试多个候选字段名，命中即用。</p>
      */
     @SuppressWarnings("unchecked")
-    private List<Requirement> parseRemoteResponse(String body) {
+    private List<Requirement> parseRemoteResponse(JsonNode root) {
         try {
-            JsonNode root = objectMapper.readTree(body);
             JsonNode data = root.get("data");
             if (data == null) {
                 log.warn("远程返回缺少 data 字段：root keys={}",
@@ -1124,8 +1341,9 @@ public class RequirementService {
             String body = readStream(conn);
             log.debug("远程详情接口响应：sourceId={}, bodyLen={}", sourceId, body.length());
 
+            // 网关外壳校验：HTTP 200 也可能携带业务码 401（token 过期）
+            JsonNode root = checkGatewayEnvelope(body);
             // 解析 JSON：取出 data 节点原样返回
-            JsonNode root = objectMapper.readTree(body);
             JsonNode data = root.get("data");
             if (data == null || data.isNull()) {
                 log.warn("远程详情返回缺少 data 字段：root keys={}, sourceId={}",

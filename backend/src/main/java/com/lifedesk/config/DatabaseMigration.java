@@ -75,7 +75,7 @@ public class DatabaseMigration implements ApplicationRunner {
             "skill", "meeting", "task", "requirement", "favorite",
             "english_task", "custom_menu", "daily_goal", "english_punch", "native_app",
             "music_track", "workout_record", "diet_record", "diet_check", "calorie_record",
-            "weight_record", "exercise_plan", "step_record", "vital_sign"
+            "weight_record", "exercise_plan", "step_record", "vital_sign", "body_metric"
     };
 
     @Override
@@ -87,6 +87,20 @@ public class DatabaseMigration implements ApplicationRunner {
         migrateTenantColumns();
         migrateSysUser();
         migrateMusicLyrics();
+        migrateStepCalories();
+    }
+
+    /** step_record 补 calories 列（步数折算消耗 kcal，录入步数时自动计算并同步 calorie_record），如缺失 */
+    private void migrateStepCalories() {
+        try {
+            if (!columnExistsInDb("step_record", "calories")) {
+                String sql = "ALTER TABLE step_record ADD COLUMN calories DOUBLE DEFAULT 0 COMMENT '步数折算消耗 kcal'";
+                log.info("[DBMigration] step_record 补 calories 列");
+                jdbcTemplate.execute(sql);
+            }
+        } catch (Exception ex) {
+            log.warn("[DBMigration] step_record calories 迁移失败（忽略）：{}", ex.getMessage());
+        }
     }
 
     /** music_track 补 lyrics 歌词列（LRC 同步歌词或纯文本），如缺失 */

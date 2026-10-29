@@ -64,20 +64,20 @@
         </button>
       </nav>
 
-      <!-- 今日健康迷你卡 -->
-      <div class="health-mini">
+      <!-- 今日健康迷你卡：真实数据（步数目标完成率 / 今日消耗与赤字盈余 / 最新体重），60s 轮询 + 健康页保存后事件刷新 -->
+      <div class="health-mini" title="数据来自「个人健康」，录入记录后自动刷新">
         <div class="mini-title">今日健康</div>
         <div class="mini-row">
           <span class="mini-key">步数</span>
-          <span class="mini-val">8,425 / 10k · 84%</span>
+          <span class="mini-val">{{ miniSteps }}</span>
         </div>
         <div class="mini-row">
           <span class="mini-key">消耗</span>
-          <span class="mini-val text-positive">-320 kcal · 赤字</span>
+          <span class="mini-val" :class="miniBurnClass">{{ miniBurn }}</span>
         </div>
         <div class="mini-row">
           <span class="mini-key">体重</span>
-          <span class="mini-val">65.2 kg · -0.8</span>
+          <span class="mini-val">{{ miniWeight }}</span>
         </div>
       </div>
 
@@ -97,87 +97,93 @@
           </template>
         </el-input>
         <!-- 主题切换：深紫玻璃(glass) → 科技HUD(tech) → 奶白暖调(cream) 循环，选择持久化 localStorage -->
-        <!-- 全局音乐迷你展示：播放时出现，均衡器动态 + 歌名 + 播放/暂停；
-             播放器为全局单例，切菜单不中断（位于主题切换旁） -->
-        <div v-if="player.current" class="mini-player" :title="player.playing ? '点击暂停' : '点击播放'">
-          <span class="np-eq" :class="{ paused: !player.playing }" @click="player.toggle()">
-            <i /><i /><i /><i />
-          </span>
-          <span class="np-title" @click="player.toggle()">{{ player.current.title }}</span>
-          <el-icon class="np-btn" :size="16" @click="player.toggle()">
-            <VideoPause v-if="player.playing" />
-            <VideoPlay v-else />
-          </el-icon>
-        </div>
-        <button
-          class="theme-toggle"
-          :title="'当前：' + THEME_LABEL[theme] + '，点击切换下一主题'"
-          @click="toggleTheme"
-        >
-          <el-icon :size="18">
-            <component :is="theme === 'tech' ? Cpu : theme === 'cream' ? MilkTea : theme === 'doomsday' ? Moon : Sunny" />
-          </el-icon>
-          <span>{{ THEME_LABEL[theme] }}</span>
-        </button>
-        <!-- 当前用户：展示昵称，下拉可退出登录 -->
-        <el-dropdown class="user-chip" trigger="click" @command="onUserCommand">
-          <span class="uc-inner" title="当前登录用户">
-            <span class="uc-avatar">{{ nickname.slice(0, 1) }}</span>
-            <span class="uc-name">{{ nickname }}</span>
-            <el-icon :size="12" class="uc-caret"><ArrowDown /></el-icon>
-          </span>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="logout">
-                <el-icon><SwitchButton /></el-icon>退出登录
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <!-- 告警闹铃：徽标展示当前活跃告警数量；hover 或点击弹出告警明细 -->
-        <div
-          class="bell"
-          :class="{ 'bell-active': alertCount > 0 }"
-          @mouseenter="bellOpen = true"
-          @mouseleave="bellOpen = false"
-          @click="bellOpen = !bellOpen"
-        >
-          <el-badge :value="alertCount" :hidden="alertCount === 0" :max="99" class="bell-badge">
-            <el-icon :size="20"><Bell /></el-icon>
-          </el-badge>
-
-          <!-- 告警明细弹层 -->
+        <!-- 顶栏右侧功能区：音乐迷你展示紧贴主题切换左侧（播放时出现），其右依次为主题切换/用户/告警 -->
+        <div class="topbar-right">
+          <!-- 全局音乐迷你展示：播放时出现，均衡器动态 + 歌名 + 播放/暂停；
+               播放器为全局单例，切菜单不中断 -->
+          <div v-if="player.current" class="mini-player" :title="player.playing ? '点击暂停' : '点击播放'">
+            <span class="np-eq" :class="{ paused: !player.playing }" @click="player.toggle()">
+              <i /><i /><i /><i />
+            </span>
+            <span class="np-title" @click="player.toggle()">{{ player.current.title }}</span>
+            <el-icon class="np-btn" :size="16" @click="player.toggle()">
+              <VideoPause v-if="player.playing" />
+              <VideoPlay v-else />
+            </el-icon>
+          </div>
+          <button
+            class="theme-toggle"
+            :title="'当前：' + THEME_LABEL[theme] + '，点击切换下一主题'"
+            @click="toggleTheme"
+          >
+            <el-icon :size="18">
+              <component :is="theme === 'tech' ? Cpu : theme === 'cream' ? MilkTea : theme === 'doomsday' ? Moon : Sunny" />
+            </el-icon>
+            <span>{{ THEME_LABEL[theme] }}</span>
+          </button>
+          <!-- 当前用户：展示昵称，下拉可退出登录 -->
+          <el-dropdown class="user-chip" trigger="click" @command="onUserCommand">
+            <span class="uc-inner" title="当前登录用户">
+              <span class="uc-avatar">{{ nickname.slice(0, 1) }}</span>
+              <span class="uc-name">{{ nickname }}</span>
+              <el-icon :size="12" class="uc-caret"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="logout">
+                  <el-icon><SwitchButton /></el-icon>退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <!-- 告警闹铃：徽标展示当前活跃告警数量；hover 或点击弹出告警明细 -->
           <div
-            v-show="bellOpen"
-            class="bell-pop"
+            class="bell"
+            :class="{ 'bell-active': alertCount > 0 }"
             @mouseenter="bellOpen = true"
             @mouseleave="bellOpen = false"
+            @click="bellOpen = !bellOpen"
           >
-            <div class="bell-pop-head">
-              <span class="bph-title">当前告警</span>
-              <span class="bph-count" :class="{ danger: alertCount > 0 }">{{ alertCount }} 条</span>
-            </div>
-            <div v-if="alertCount === 0" class="bell-pop-empty">
-              <el-icon><CircleCheck /></el-icon>
-              <span>所有中间件运行正常，暂无活跃告警</span>
-            </div>
-            <div v-else class="bell-pop-list">
+            <el-badge :value="alertCount" :hidden="alertCount === 0" :max="99" class="bell-badge">
+              <el-icon :size="20"><Bell /></el-icon>
+            </el-badge>
+
+            <!-- 告警明细弹层：Teleport 到 body——顶栏 backdrop-filter 会创建堆叠上下文，
+                 弹层放在顶栏内部无论 z-index 多高都会被内容区盖住，传送到顶层才能置顶 -->
+            <Teleport to="body">
               <div
-                v-for="a in alerts"
-                :key="a.key"
-                class="bell-pop-item"
-                :class="'lv-' + a.level"
+                v-show="bellOpen"
+                class="bell-pop"
+                @mouseenter="bellOpen = true"
+                @mouseleave="bellOpen = false"
               >
-                <div class="bpi-head">
-                  <span class="bpi-source">{{ sourceLabel(a.source) }}</span>
-                  <span class="bpi-level">{{ levelLabel(a.level) }}</span>
-                </div>
-                <div class="bpi-msg">{{ a.message }}</div>
-                <div class="bpi-time">
-                  首次 {{ a.firstTime }} · 最近 {{ a.lastTime }} · 触发 {{ a.count }} 次
+              <div class="bell-pop-head">
+                <span class="bph-title">当前告警</span>
+                <span class="bph-count" :class="{ danger: alertCount > 0 }">{{ alertCount }} 条</span>
+              </div>
+              <div v-if="alertCount === 0" class="bell-pop-empty">
+                <el-icon><CircleCheck /></el-icon>
+                <span>所有中间件运行正常，暂无活跃告警</span>
+              </div>
+              <div v-else class="bell-pop-list">
+                <div
+                  v-for="a in alerts"
+                  :key="a.key"
+                  class="bell-pop-item"
+                  :class="'lv-' + a.level"
+                >
+                  <div class="bpi-head">
+                    <span class="bpi-source">{{ sourceLabel(a.source) }}</span>
+                    <span class="bpi-level">{{ levelLabel(a.level) }}</span>
+                  </div>
+                  <div class="bpi-msg">{{ a.message }}</div>
+                  <div class="bpi-time">
+                    首次 {{ a.firstTime }} · 最近 {{ a.lastTime }} · 触发 {{ a.count }} 次
+                  </div>
                 </div>
               </div>
-            </div>
+              </div>
+            </Teleport>
           </div>
         </div>
       </header>
@@ -311,7 +317,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -350,6 +356,8 @@ import { useTheme } from "@/composables/useTheme";
 import { useAlerts, startAlertPolling } from "@/composables/useAlerts";
 import { usePlayer } from "@/composables/usePlayer";
 import { logout as authLogout } from "@/api/auth";
+import { fetchHealthOverview } from "@/api/health";
+import { fetchDailyGoals } from "@/api/dailyGoal";
 import type { CustomMenu } from "@/api/customMenu";
 
 defineOptions({ name: "MainLayout" });
@@ -678,9 +686,75 @@ async function onTabDelete() {
   }
 }
 
+// ===== 左下角"今日健康"迷你卡：与个人健康页同一数据源（overview + 每日目标） =====
+const healthOv = ref<any>(null);
+const healthGoals = ref<any[]>([]);
+let healthTimer: ReturnType<typeof setInterval> | null = null;
+
+/** 某指标当前生效目标值（无则用默认值） */
+function healthGoalVal(scope: string, def: number): number {
+  const g = healthGoals.value.find((x) => x.scope === scope);
+  const v = g ? parseFloat(g.goalValue) : NaN;
+  return isNaN(v) ? def : v;
+}
+
+/** 步数行：8,425 / 10k · 84% */
+const miniSteps = computed(() => {
+  const steps = healthOv.value?.stat?.steps_today ?? 0;
+  const goal = healthGoalVal("steps", 10000);
+  const percent = goal > 0 ? Math.min(100, Math.round((steps / goal) * 100)) : 0;
+  const goalText = goal >= 1000 ? `${Math.round(goal / 1000)}k` : String(goal);
+  return `${steps.toLocaleString()} / ${goalText} · ${percent}%`;
+});
+
+/** 消耗行：净额 <0 → "-N kcal · 赤字"（绿色）；>=0 → "+N kcal · 盈余"（橙色） */
+const miniBurn = computed(() => {
+  const s = healthOv.value?.today_summary;
+  if (!s) return "--";
+  const burn = s.burn_today ?? 0;
+  const net = s.net ?? 0;
+  return net < 0 ? `-${burn.toLocaleString()} kcal · 赤字` : `+${net.toLocaleString()} kcal · 盈余`;
+});
+const miniBurnClass = computed(() =>
+  (healthOv.value?.today_summary?.net ?? 0) < 0 ? "text-positive" : "text-warning"
+);
+
+/** 体重行：65.2 kg · -0.8（较最近一次记录的变化） */
+const miniWeight = computed(() => {
+  const w = healthOv.value?.stat?.weight;
+  if (w == null) return "--";
+  const delta = healthOv.value?.stat?.weight_delta ?? 0;
+  const sign = delta > 0 ? "+" : "";
+  return `${w} kg · ${sign}${delta}`;
+});
+
+/** 拉取今日健康数据（失败静默，迷你卡显示占位） */
+async function loadHealthMini() {
+  try {
+    const [ov, g] = await Promise.all([fetchHealthOverview(), fetchDailyGoals("health")]);
+    healthOv.value = ov.data;
+    healthGoals.value = g.data?.current || [];
+  } catch {
+    /* 静默：迷你卡保留上次数据 */
+  }
+}
+
+function onHealthChanged() {
+  loadHealthMini();
+}
+
 onMounted(() => {
   loadCustomMenus();
   startAlertPolling();
+  // 今日健康迷你卡：立即加载 + 60s 轮询兜底 + 健康页/首页保存后事件即时刷新
+  loadHealthMini();
+  healthTimer = setInterval(loadHealthMini, 60000);
+  window.addEventListener("health-updated", onHealthChanged);
+});
+
+onUnmounted(() => {
+  if (healthTimer) clearInterval(healthTimer);
+  window.removeEventListener("health-updated", onHealthChanged);
 });
 </script>
 
@@ -894,8 +968,14 @@ onMounted(() => {
   flex: 1;
   max-width: 520px;
 }
-.bell {
+/** 顶栏右侧功能区：整体推到最右，内部元素紧挨排列（迷你播放器紧贴主题切换左侧） */
+.topbar-right {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+.bell {
   cursor: pointer;
   color: $text-secondary;
   position: relative;
@@ -915,11 +995,11 @@ onMounted(() => {
 .bell-badge {
   display: inline-flex;
 }
-// 告警明细弹层（hover / 点击均可展开）
+// 告警明细弹层（hover / 点击均可展开）：Teleport 到 body，fixed 定位 + 最高层级，绝不被页面元素遮盖
 .bell-pop {
-  position: absolute;
-  top: calc(100% + 12px);
-  right: -8px;
+  position: fixed;
+  top: 72px; // 顶栏 60px + 12px 间距
+  right: 22px; // 与顶栏右内边距对齐
   width: 360px;
   max-width: 80vw;
   max-height: 60vh;
@@ -931,7 +1011,7 @@ onMounted(() => {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
-  z-index: 50;
+  z-index: 3000; // 高于 Element Plus 弹层默认层级（~2000）
   scrollbar-width: thin;
   &::-webkit-scrollbar { width: 6px; }
   &::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.35); border-radius: 3px; }
@@ -1111,7 +1191,6 @@ onMounted(() => {
 
 // 主题切换按钮：跟随主题变量自动换肤
 .theme-toggle {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;

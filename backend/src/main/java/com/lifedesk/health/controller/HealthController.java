@@ -70,6 +70,21 @@ public class HealthController {
         return R.ok(healthService.getVitalToday());
     }
 
+    /** 身体指标：最近一次 + 近 90 天历史 */
+    @GetMapping("/body-metrics")
+    public R<Map<String, Object>> bodyMetrics() {
+        Map<String, Object> d = new java.util.HashMap<>();
+        d.put("latest", healthService.getBodyMetricLatest());
+        d.put("history", healthService.listBodyMetricHistory());
+        return R.ok(d);
+    }
+
+    /** 保存身体指标（身高/体重/三围/体脂，按今天覆盖更新） */
+    @PostMapping("/body-metric")
+    public R<com.lifedesk.health.entity.BodyMetric> saveBodyMetric(@RequestBody Map<String, Object> body) {
+        return R.ok(healthService.saveBodyMetric(body));
+    }
+
     @GetMapping("/overview")
     public R<Map<String, Object>> overview() {
         return R.ok(healthService.overview());

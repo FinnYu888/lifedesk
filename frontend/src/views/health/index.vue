@@ -44,13 +44,13 @@
               @click="onSaveGoal(m)"
             >设为目标</el-button>
           </div>
-          <!-- 睡眠/水分：支持每日实际值输入，输入后与目标比对计算完成百分比 -->
-          <div v-if="m.key === 'sleep' || m.key === 'water'" class="gi-edit record">
+          <!-- 步数/睡眠/水分：支持每日实际值输入，输入后与目标比对计算完成百分比 -->
+          <div v-if="m.key === 'steps' || m.key === 'sleep' || m.key === 'water'" class="gi-edit record">
             <span class="gi-rec-label">今日</span>
             <el-input-number
               v-model="vitalForm[m.key]"
               :min="0"
-              :max="m.key === 'sleep' ? 24 : 10000"
+              :max="m.key === 'sleep' ? 24 : m.max"
               :step="m.step"
               size="small"
               :controls="false"
@@ -63,6 +63,7 @@
               :disabled="vitalForm[m.key] == null"
               @click="onSaveVital(m.key)"
             >记录</el-button>
+            <span v-if="m.key === 'steps'" class="gi-rec-tip">按体重自动折算消耗</span>
           </div>
         </div>
         <!-- 动态运动目标：枚举来自「添加运动」的运动字典，实际值取今日该运动记录 -->
@@ -106,6 +107,7 @@
           <div class="bal-label">消耗</div>
           <div class="bal-val burn">{{ summary.burn_today ?? 0 }} <span class="unit">kcal</span></div>
           <ProgressBar :label="`目标 ${goalOf('burn')} kcal`" :percent="Math.min(100, Math.round(((summary.burn_today ?? 0) / goalOf('burn')) * 100))" color="#2dd4bf" />
+          <div v-if="(summary.steps_burn ?? 0) > 0" class="bal-sub">含步数消耗 {{ summary.steps_burn }} kcal</div>
         </div>
         <div class="balance-divider">=</div>
         <div class="balance-col">
@@ -180,6 +182,41 @@
       <div class="ld-card">
         <div class="card-title">体重·体脂变化趋势</div>
         <VChart :option="weightOption" autoresize style="height: 220px" />
+      </div>
+
+      <!-- 4.5 身体指标录入（身高/体重/三围/体脂），按天覆盖保存 -->
+      <div class="ld-card">
+        <div class="card-head">
+          <div class="card-title">身体指标</div>
+          <span v-if="bodyMetric.recordDate" class="bm-date">{{ bodyMetric.recordDate }} 记录</span>
+        </div>
+        <div class="bm-grid">
+          <div v-for="f in BODY_FIELDS" :key="f.key" class="bm-item">
+            <span class="bm-label">{{ f.label }}</span>
+            <el-input-number
+              v-model="bodyForm[f.key]"
+              :min="f.min"
+              :max="f.max"
+              :step="f.step"
+              :controls="false"
+              size="small"
+              :placeholder="latestVal(f.key)"
+              class="bm-input"
+            />
+            <span class="bm-unit">{{ f.unit }}</span>
+          </div>
+        </div>
+        <div class="bm-foot">
+          <span v-if="bodyMetric.weightKg || bodyMetric.bodyFat" class="bm-latest">
+            最新：体重 {{ bodyMetric.weightKg ?? "—" }}kg · 体脂 {{ bodyMetric.bodyFat ?? "—" }}%
+            <template v-if="bodyMetric.bustCm || bodyMetric.waistCm || bodyMetric.hipCm">
+              · 三围 {{ bodyMetric.bustCm ?? "—" }}/{{ bodyMetric.waistCm ?? "—" }}/{{ bodyMetric.hipCm ?? "—" }}cm
+            </template>
+          </span>
+          <el-button type="primary" size="small" :loading="bodySaving" :disabled="bodyFormEmpty" @click="onSaveBodyMetric">
+            保存指标
+          </el-button>
+        </div>
       </div>
 
       <!-- 5. 运动计划达成率 -->
@@ -342,6 +379,8 @@ import {
   deleteWorkout,
   deleteDiet,
   recordHealth,
+  fetchBodyMetrics,
+  saveBodyMetric,
 } from "@/api/health";
 import { fetchDailyGoals, saveDailyGoal, deleteDailyGoal, type DailyGoal } from "@/api/dailyGoal";
 
@@ -526,6 +565,7 @@ async function onSaveGoal(m: MetricDef) {
     });
     ElMessage.success(`已设为新的每日${m.label}目标，进入下一阶段`);
     await loadGoals();
+    notifyHealthChanged();
   } catch {
     /* 拦截器已提示 */
   } finally {
@@ -603,6 +643,7 @@ async function submitAddGoal() {
     ElMessage.success(`已新增每日目标：${d.name} ${addGoalDialog.value}${addGoalDialog.unit}`);
     addGoalDialog.visible = false;
     await loadGoals();
+    notifyHealthChanged();
   } catch {
     /* 拦截器已提示 */
   } finally {
@@ -621,30 +662,105 @@ async function onDeleteExerciseGoal(g: DailyGoal) {
     await deleteDailyGoal("health", g.scope!);
     ElMessage.success("目标已删除");
     await loadGoals();
+    notifyHealthChanged();
   } catch {
     /* 拦截器已提示 */
   }
 }
 
-// ===== 今日睡眠/水分输入（记录后与目标比对刷新完成百分比） =====
-const vitalForm = reactive<{ sleep: number | null; water: number | null }>({ sleep: null, water: null });
-const vitalSavingKey = ref<string | null>(null);
+// ===== 今日步数/睡眠/水分输入（记录后与目标比对刷新完成百分比） =====
+const vitalForm = reactive<Record<string, number | null>>({});const vitalSavingKey = ref<string | null>(null);
 
-async function onSaveVital(key: "sleep" | "water") {
+/**
+ * 通知全局健康数据已变化：布局左下角"今日健康"迷你卡 + 首页健康区域监听后立即刷新。
+ * 也配合 60s 轮询兜底，保证跨页面数据一致。
+ */
+function notifyHealthChanged() {
+  window.dispatchEvent(new CustomEvent("health-updated"));
+}
+
+async function onSaveVital(key: "steps" | "sleep" | "water") {
   const v = vitalForm[key];
   if (v == null) return;
   vitalSavingKey.value = key;
   try {
-    const body: Record<string, number> = { recordType: "vital" };
-    if (key === "sleep") body.sleepHours = v;
+    const body: Record<string, number> = { recordType: key === "steps" ? "steps" : "vital" };
+    if (key === "steps") body.steps = Math.round(v);
+    else if (key === "sleep") body.sleepHours = v;
     else body.waterMl = Math.round(v);
-    await recordHealth(body);
-    ElMessage.success(key === "sleep" ? `已记录今日睡眠 ${v} 小时` : `已记录今日饮水 ${v} 毫升`);
+    const r: any = await recordHealth(body);
+    if (key === "steps") {
+      const burned = r?.data?.caloriesBurned;
+      ElMessage.success(
+        burned != null
+          ? `已记录今日步数 ${Math.round(v)} 步，折算消耗约 ${burned} kcal`
+          : `已记录今日步数 ${Math.round(v)} 步`
+      );
+    } else {
+      ElMessage.success(key === "sleep" ? `已记录今日睡眠 ${v} 小时` : `已记录今日饮水 ${v} 毫升`);
+    }
     await loadOverview();
   } catch {
     /* 拦截器已提示 */
   } finally {
     vitalSavingKey.value = null;
+  }
+}
+
+// ===== 身体指标（身高/体重/三围/体脂，按天覆盖保存） =====
+const BODY_FIELDS = [
+  { key: "heightCm", label: "身高", unit: "cm", min: 50, max: 250, step: 0.5 },
+  { key: "weightKg", label: "体重", unit: "kg", min: 20, max: 300, step: 0.1 },
+  { key: "bustCm", label: "胸围", unit: "cm", min: 40, max: 200, step: 0.5 },
+  { key: "waistCm", label: "腰围", unit: "cm", min: 40, max: 200, step: 0.5 },
+  { key: "hipCm", label: "臀围", unit: "cm", min: 40, max: 200, step: 0.5 },
+  { key: "bodyFat", label: "体脂率", unit: "%", min: 1, max: 70, step: 0.1 },
+] as const;
+
+/** 最近一次身体指标（含 recordDate，用于展示与输入框预填） */
+const bodyMetric = ref<any>({});
+const bodyForm = reactive<Record<string, number | null>>({});
+const bodySaving = ref(false);
+
+const bodyFormEmpty = computed(() => BODY_FIELDS.every((f) => bodyForm[f.key] == null));
+
+/** 输入框 placeholder 显示最近记录值 */
+function latestVal(key: string): string {
+  const v = bodyMetric.value?.[key];
+  const f = BODY_FIELDS.find((x) => x.key === key)!;
+  return v != null ? String(v) : f.unit === "%" ? "如 18.5" : "未记录";
+}
+
+async function loadBodyMetric() {
+  try {
+    const r: any = await fetchBodyMetrics();
+    bodyMetric.value = r.data?.latest || {};
+    // 预填最近值（无则清空）
+    for (const f of BODY_FIELDS) {
+      const v = bodyMetric.value?.[f.key];
+      bodyForm[f.key] = v != null ? Number(v) : null;
+    }
+  } catch {
+    /* 拦截器已提示 */
+  }
+}
+
+async function onSaveBodyMetric() {
+  if (bodyFormEmpty.value) return;
+  bodySaving.value = true;
+  try {
+    const payload: Record<string, number> = {};
+    for (const f of BODY_FIELDS) {
+      const v = bodyForm[f.key];
+      if (v != null) payload[f.key] = v;
+    }
+    await saveBodyMetric(payload);
+    ElMessage.success("身体指标已保存（体重/体脂已同步体重趋势）");
+    await Promise.all([loadBodyMetric(), loadOverview()]);
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    bodySaving.value = false;
   }
 }
 
@@ -917,9 +1033,12 @@ async function loadOverview() {
     vital.value = d.vital;
     exerciseDict.value = d.exercise_dict || [];
     foodDict.value = d.food_dict || [];
-    // 今日实际值预填（睡眠/水分输入框）
+    // 今日实际值预填（步数/睡眠/水分输入框）
+    vitalForm.steps = stat.value.steps_today ?? null;
     vitalForm.sleep = vital.value?.sleepHours ?? null;
     vitalForm.water = vital.value?.waterMl ?? null;
+    // 通知全局（布局"今日健康"迷你卡 + 首页健康区域）立即刷新
+    notifyHealthChanged();
   } catch (e) {
     // 兜底：单独调字典与汇总接口
     try {
@@ -935,6 +1054,7 @@ async function loadOverview() {
 onMounted(() => {
   loadOverview();
   loadGoals();
+  loadBodyMetric();
 });
 </script>
 
@@ -1036,6 +1156,17 @@ onMounted(() => {
   font-size: 11px;
   color: $text-tertiary;
   white-space: nowrap;
+}
+.gi-rec-tip {
+  font-size: 11px;
+  color: $text-tertiary;
+  white-space: nowrap;
+}
+.bal-sub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: $text-tertiary;
+  text-align: center;
 }
 .gi-del {
   cursor: pointer;
@@ -1248,5 +1379,51 @@ onMounted(() => {
 }
 .ml8 {
   margin-left: 8px;
+}
+
+/* ===== 身体指标卡 ===== */
+.bm-date {
+  font-size: 11px;
+  color: $text-tertiary;
+}
+.bm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 10px 0 12px;
+}
+.bm-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bm-label {
+  font-size: 12px;
+  color: $text-secondary;
+  width: 42px;
+  flex-shrink: 0;
+}
+.bm-input {
+  flex: 1;
+  min-width: 0;
+}
+.bm-unit {
+  font-size: 11px;
+  color: $text-tertiary;
+  width: 22px;
+  flex-shrink: 0;
+}
+.bm-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.bm-latest {
+  font-size: 12px;
+  color: $text-secondary;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

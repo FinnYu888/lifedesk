@@ -69,6 +69,27 @@ export interface RequirementAuthStatus {
   source: "dynamic" | "fallback" | "none";
   /** 是否已持久化到本地文件（后端重启后仍生效） */
   persisted?: boolean;
+  /** 保存时立即探测网关校验的结果：true=有效 / false=无效 / undefined=未探测 */
+  probeValid?: boolean;
+  /** 网关校验失败原因 */
+  probeMsg?: string;
+}
+
+/**
+ * 需求/里程碑列表接口返回结构（带失败原因元信息）。
+ *
+ * <p>网关对无效/过期 token 返回 HTTP 200 + 业务码 401，后端解析后把原因透传，
+ * 前端不再靠"列表为空"猜测鉴权状态。</p>
+ */
+export interface RequirementListData<T = any> {
+  /** 数据列表 */
+  list: T[];
+  /** 鉴权是否过期（网关业务码 401/403） */
+  authExpired?: boolean;
+  /** 失败原因（拉取成功时为 null） */
+  remoteError?: string | null;
+  /** 数据来源：remote=远程接口 / local=本地表 */
+  source?: string;
 }
 
 /**
@@ -76,6 +97,7 @@ export interface RequirementAuthStatus {
  * @param sprint  可选 sprint 过滤（如 CDS20261025）
  * @param status  可选任务状态过滤：todo/doing/testing/pending/done/cancel
  * @param keyword 可选关键词，按 任务详情/关联话题/产品/测试人 模糊匹配
+ * @returns data 为 RequirementListData<Requirement>（list + authExpired + remoteError）
  */
 // 防缓存三件套：_t 时间戳参数 + no-cache 请求头 + 30s 超时（后端需实时透传远程接口，保存鉴权后立即拉新数据）
 export const fetchRequirements = (
@@ -93,7 +115,9 @@ export const fetchRequirements = (
 export const fetchRequirementDetail = (sourceId: string) =>
   http.get<any, Result>(`/project/requirements/${sourceId}/detail`);
 
-/** 拉取里程碑进度（按 sprint 聚合，sprint 后 8 位即里程碑日期） */
+/** 拉取里程碑进度（按 sprint 聚合，sprint 后 8 位即里程碑日期）
+ * @returns data 为 RequirementListData<RequirementMilestone>（list + authExpired + remoteError）
+ */
 // 单独设置 60s 超时：后端需串行调用 sprint/query + developTask/query + 每个 sprint 的 issue/query，耗时较长
 export const fetchRequirementMilestones = () =>
   http.get<any, Result>("/project/milestones", {

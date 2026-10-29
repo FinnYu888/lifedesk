@@ -37,3 +37,18 @@ export const deleteDiet = (id: number) =>
 // ===== 汇总 =====
 export const fetchTodaySummary = () => http.get<any, Result>("/health/today-summary");
 export const fetchTrend = () => http.get<any, Result>("/health/trend");
+
+// ===== 身体指标（身高/体重/三围/体脂） =====
+export interface BodyMetric {
+  id?: number;
+  recordDate?: string;
+  heightCm?: number | null;
+  weightKg?: number | null;
+  bustCm?: number | null;
+  waistCm?: number | null;
+  hipCm?: number | null;
+  bodyFat?: number | null;
+}
+export const fetchBodyMetrics = () => http.get<any, Result>("/health/body-metrics");
+export const saveBodyMetric = (data: Partial<BodyMetric>) =>
+  http.post<any, Result>("/health/body-metric", data);

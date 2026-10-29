@@ -295,6 +295,7 @@ CREATE TABLE IF NOT EXISTS step_record (
     record_date DATE NOT NULL,
     steps INT DEFAULT 0,
     goal INT DEFAULT 10000,
+    calories DOUBLE DEFAULT 0 COMMENT '步数折算消耗 kcal',
     deleted TINYINT DEFAULT 0,
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -313,6 +314,21 @@ CREATE TABLE IF NOT EXISTS vital_sign (
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_date(record_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='生理体征：心率/睡眠/水分';
+
+CREATE TABLE IF NOT EXISTS body_metric (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    record_date DATE NOT NULL,
+    height_cm DOUBLE DEFAULT NULL COMMENT '身高 cm',
+    weight_kg DOUBLE DEFAULT NULL COMMENT '体重 kg',
+    bust_cm DOUBLE DEFAULT NULL COMMENT '胸围 cm',
+    waist_cm DOUBLE DEFAULT NULL COMMENT '腰围 cm',
+    hip_cm DOUBLE DEFAULT NULL COMMENT '臀围 cm',
+    body_fat DOUBLE DEFAULT NULL COMMENT '体脂率 %',
+    deleted TINYINT DEFAULT 0,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_date(record_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='身体指标：身高/体重/三围/体脂';
 
 -- ========== 我的需求（第三方需求平台拉取） ==========
 -- 字段对齐第三方接口 https://wetrans.cimc.cn/gateway/apiIssue/developTask/query 的返回

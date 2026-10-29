@@ -50,12 +50,17 @@ public class ProjectController {
         return R.ok(projectService.listActive());
     }
 
-    /** 里程碑进度：从需求接口查询到的 sprint 聚合（CDS20261025 形式，后 8 位为里程碑日期） */
+    /**
+     * 里程碑进度：从需求接口查询到的 sprint 聚合（CDS20261025 形式，后 8 位为里程碑日期）。
+     *
+     * <p>返回 data：{@code {list:[...], authExpired:bool, remoteError:str|null}}——
+     * 网关对过期 token 返回 HTTP 200 + 业务码 401，必须把失败原因透传给前端，不能静默空列表。</p>
+     */
     @GetMapping("/milestones")
-    public R<List<Milestone>> milestones(javax.servlet.http.HttpServletResponse response) {
+    public R<Map<String, Object>> milestones(javax.servlet.http.HttpServletResponse response) {
         // 实时聚合数据，禁止任何缓存（保存新鉴权后前端立即局部刷新，防止拿到旧响应）
         response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
-        return R.ok(requirementService.listMilestones());
+        return R.ok(requirementService.listMilestonesWithMeta());
     }
 
     /** 最近提交活动：每个项目的最近一条 commit（含项目名） */
@@ -66,20 +71,23 @@ public class ProjectController {
 
     /**
      * 我的需求：从第三方需求平台 {@code https://wetrans.cimc.cn/gateway/apiIssue/developTask/query} 拉取。
-     * <p>远程接口暂不通，回退本地 mock 表，后续提供 token 后无缝切换。</p>
+     *
+     * <p>返回 data：{@code {list:[...], authExpired:bool, remoteError:str|null, source:str}}——
+     * 网关对无效/过期 token 返回 HTTP 200 + 响应体 {@code {"code":"401","msg":"服务异常"}}（实测确认），
+     * 因此必须解析业务码并把失败原因透传给前端，不能静默返回空列表让前端靠猜。</p>
      *
      * @param sprint  可选 sprint 过滤（CDS20261025）
      * @param status  可选任务状态过滤：todo/doing/testing/pending/done
      * @param keyword 可选关键词，按 任务详情/关联话题/产品/测试人 模糊匹配
      */
     @GetMapping("/requirements")
-    public R<List<Requirement>> requirements(@RequestParam(required = false) String sprint,
-                                              @RequestParam(required = false) String status,
-                                              @RequestParam(required = false) String keyword,
-                                              javax.servlet.http.HttpServletResponse response) {
+    public R<Map<String, Object>> requirements(@RequestParam(required = false) String sprint,
+                                               @RequestParam(required = false) String status,
+                                               @RequestParam(required = false) String keyword,
+                                               javax.servlet.http.HttpServletResponse response) {
         // 实时透传远程接口数据，禁止任何缓存（保存新鉴权后前端立即局部刷新，防止拿到旧响应）
         response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
-        return R.ok(requirementService.list(sprint, status, keyword));
+        return R.ok(requirementService.listWithMeta(sprint, status, keyword));
     }
 
     /**
@@ -102,13 +110,22 @@ public class ProjectController {
      * <p>{@code wetrans.cimc.cn/gateway/} 开头的接口鉴权信息每日可能过期，
      * 用户输入最新 token 后，立即对所有 fetch* 方法生效，并触发前端刷新"我的需求"+"里程碑进度"。</p>
      *
+     * <p>保存前自动清洗（去 Bearer 前缀/引号/首尾空白），保存后立即用网关探测校验，
+     * 结果放入返回的 {@code probeValid}/{@code probeMsg}——token 无效时前端立刻报错，
+     * 而不是等用户刷新列表后面对"空数据"不知原因。</p>
+     *
      * <p>请求体：{@code {"token": "<JWT，不带 Bearer 前缀>"}}，传空则清空动态 token</p>
      */
     @PostMapping("/requirements/authorization")
     public R<Map<String, Object>> setAuthorization(@RequestBody Map<String, String> body) {
         String token = body == null ? null : body.get("token");
         requirementService.setAuthorization(token);
-        return R.ok(requirementService.getAuthorizationStatus());
+        Map<String, Object> status = requirementService.getAuthorizationStatus();
+        // 保存后立即探测网关校验，让用户马上知道粘贴的鉴权信息是否有效
+        Map<String, Object> probe = requirementService.probeToken();
+        status.put("probeValid", probe.get("valid"));
+        status.put("probeMsg", probe.get("msg"));
+        return R.ok(status);
     }
 
     /**

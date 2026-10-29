@@ -40,6 +40,7 @@ public class HealthService {
     private final ExerciseDictMapper exerciseDictMapper;
     private final FoodDictMapper foodDictMapper;
     private final DietRecordMapper dietRecordMapper;
+    private final BodyMetricMapper bodyMetricMapper;
 
     /** 默认体重 kg，无体重记录时用于 MET 卡路里估算 */
     private static final double DEFAULT_WEIGHT_KG = 65.0;
@@ -76,24 +77,76 @@ public class HealthService {
     /** 统计卡：周完成率 / 今日步数（step_record 当日真实值） / 体重（最近记录） */
     public Map<String, Object> getStat() {
         Map<String, Object> stat = new HashMap<>();
-        stat.put("week_rate", 82);
-        stat.put("week_rate_delta", "+6%");
+        // 周完成率：过去 7 天中"有健康打卡"（饮食打卡/运动记录/步数/体征任一）的天数占比，全部来自真实录入
+        LocalDate weekStart = LocalDate.now().minusDays(6);
+        Set<LocalDate> checkedDays = new HashSet<>();
+        for (DietCheck dc : dietCheckMapper.selectList(new LambdaQueryWrapper<DietCheck>()
+                .ge(DietCheck::getCheckDate, weekStart))) {
+            if (nz(dc.getBreakfast()) + nz(dc.getLunch()) + nz(dc.getDinner()) + nz(dc.getSnack()) > 0) {
+                checkedDays.add(dc.getCheckDate());
+            }
+        }
+        for (WorkoutRecord w : workoutRecordMapper.selectList(new LambdaQueryWrapper<WorkoutRecord>()
+                .ge(WorkoutRecord::getRecordDate, weekStart))) {
+            checkedDays.add(w.getRecordDate());
+        }
+        for (StepRecord s : stepRecordMapper.selectList(new LambdaQueryWrapper<StepRecord>()
+                .ge(StepRecord::getRecordDate, weekStart))) {
+            if (s.getSteps() != null && s.getSteps() > 0) {
+                checkedDays.add(s.getRecordDate());
+            }
+        }
+        for (VitalSign v : vitalSignMapper.selectList(new LambdaQueryWrapper<VitalSign>()
+                .ge(VitalSign::getRecordDate, weekStart))) {
+            if ((v.getSleepHours() != null && v.getSleepHours() > 0)
+                    || (v.getWaterMl() != null && v.getWaterMl() > 0)) {
+                checkedDays.add(v.getRecordDate());
+            }
+        }
+        int weekRate = (int) Math.round(checkedDays.size() * 100.0 / 7);
+        stat.put("week_rate", Math.min(100, weekRate));
+        // 周完成率环比：本周打卡天数 vs 上一个 7 天的打卡天数
+        LocalDate prevStart = weekStart.minusDays(7);
+        Set<LocalDate> prevDays = new HashSet<>();
+        for (DietCheck dc : dietCheckMapper.selectList(new LambdaQueryWrapper<DietCheck>()
+                .ge(DietCheck::getCheckDate, prevStart).le(DietCheck::getCheckDate, weekStart.minusDays(1)))) {
+            if (nz(dc.getBreakfast()) + nz(dc.getLunch()) + nz(dc.getDinner()) + nz(dc.getSnack()) > 0) {
+                prevDays.add(dc.getCheckDate());
+            }
+        }
+        for (WorkoutRecord w : workoutRecordMapper.selectList(new LambdaQueryWrapper<WorkoutRecord>()
+                .ge(WorkoutRecord::getRecordDate, prevStart).le(WorkoutRecord::getRecordDate, weekStart.minusDays(1)))) {
+            prevDays.add(w.getRecordDate());
+        }
+        int prevRate = (int) Math.round(prevDays.size() * 100.0 / 7);
+        int delta = Math.min(100, weekRate) - prevRate;
+        stat.put("week_rate_delta", (delta >= 0 ? "+" : "") + delta + "%");
         // 今日步数：读取 step_record 当日记录，无记录则为 0（配合每日步数目标计算完成百分比）
         StepRecord todayStep = stepRecordMapper.selectOne(
                 new LambdaQueryWrapper<StepRecord>().eq(StepRecord::getRecordDate, LocalDate.now()));
         int stepsToday = todayStep != null && todayStep.getSteps() != null ? todayStep.getSteps() : 0;
         stat.put("steps_today", stepsToday);
         // 体重：最近一条记录；无记录用默认值
-        WeightRecord latestWeight = weightRecordMapper.selectOne(
+        List<WeightRecord> weights = weightRecordMapper.selectList(
                 new LambdaQueryWrapper<WeightRecord>()
                         .isNotNull(WeightRecord::getWeight)
                         .orderByDesc(WeightRecord::getRecordDate)
-                        .last("LIMIT 1"));
-        double weight = latestWeight != null && latestWeight.getWeight() != null ? latestWeight.getWeight() : 65.2;
+                        .last("LIMIT 2"));
+        double weight = !weights.isEmpty() && weights.get(0).getWeight() != null ? weights.get(0).getWeight() : 65.2;
         stat.put("weight", weight);
-        stat.put("weight_delta", -0.6);
+        // 体重变化：最近两次真实记录差值（无历史记录为 0）
+        double weightDelta = 0;
+        if (weights.size() >= 2 && weights.get(1).getWeight() != null) {
+            weightDelta = Math.round((weight - weights.get(1).getWeight()) * 10) / 10.0;
+        }
+        stat.put("weight_delta", weightDelta);
         stat.put("weight_target", WEIGHT_TARGET);
         return stat;
+    }
+
+    /** null 安全取 int（用于饮食打卡 0/1 标记求和） */
+    private int nz(Integer v) {
+        return v == null ? 0 : v;
     }
 
     /** 健身动作·本周完成 */
@@ -148,6 +201,101 @@ public class HealthService {
                         .eq(VitalSign::getRecordDate, LocalDate.now()));
     }
 
+    // ============================================================
+    // 身体指标（身高/体重/三围/体脂）
+    // ============================================================
+
+    /** 最近一次身体指标（无记录返回 null） */
+    public BodyMetric getBodyMetricLatest() {
+        List<BodyMetric> list = bodyMetricMapper.selectList(
+                new LambdaQueryWrapper<BodyMetric>()
+                        .orderByDesc(BodyMetric::getRecordDate)
+                        .orderByDesc(BodyMetric::getId)
+                        .last("LIMIT 1"));
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    /** 近 90 天身体指标历史（按日期升序，供趋势图/对比） */
+    public List<BodyMetric> listBodyMetricHistory() {
+        return bodyMetricMapper.selectList(
+                new LambdaQueryWrapper<BodyMetric>()
+                        .ge(BodyMetric::getRecordDate, LocalDate.now().minusDays(90))
+                        .orderByAsc(BodyMetric::getRecordDate));
+    }
+
+    /**
+     * 保存身体指标：按今天 upsert（同日重复保存为覆盖更新，仅覆盖填写的字段）。
+     * 体重/体脂同步镜像到 weight_record（同日 upsert），保持体重趋势卡与统计卡一致。
+     */
+    public BodyMetric saveBodyMetric(Map<String, Object> body) {
+        LocalDate date = LocalDate.now();
+        BodyMetric m = bodyMetricMapper.selectOne(
+                new LambdaQueryWrapper<BodyMetric>().eq(BodyMetric::getRecordDate, date));
+        boolean create = m == null;
+        if (create) {
+            m = new BodyMetric();
+            m.setRecordDate(date);
+        }
+        Double weight = null;
+        Double fat = null;
+        Double v;
+        if ((v = readPositive(body.get("heightCm"))) != null) {
+            m.setHeightCm(v);
+        }
+        if ((v = readPositive(body.get("weightKg"))) != null) {
+            m.setWeightKg(v);
+            weight = v;
+        }
+        if ((v = readPositive(body.get("bustCm"))) != null) {
+            m.setBustCm(v);
+        }
+        if ((v = readPositive(body.get("waistCm"))) != null) {
+            m.setWaistCm(v);
+        }
+        if ((v = readPositive(body.get("hipCm"))) != null) {
+            m.setHipCm(v);
+        }
+        if ((v = readPositive(body.get("bodyFat"))) != null) {
+            m.setBodyFat(v);
+            fat = v;
+        }
+        if (create) {
+            bodyMetricMapper.insert(m);
+        } else {
+            bodyMetricMapper.updateById(m);
+        }
+        // 体重/体脂镜像 weight_record（同日 upsert），统计卡与体重体脂趋势直接复用
+        if (weight != null || fat != null) {
+            WeightRecord wr = weightRecordMapper.selectOne(
+                    new LambdaQueryWrapper<WeightRecord>().eq(WeightRecord::getRecordDate, date));
+            if (wr == null) {
+                wr = new WeightRecord();
+                wr.setRecordDate(date);
+                wr.setWeight(weight);
+                wr.setFatRate(fat);
+                weightRecordMapper.insert(wr);
+            } else {
+                if (weight != null) {
+                    wr.setWeight(weight);
+                }
+                if (fat != null) {
+                    wr.setFatRate(fat);
+                }
+                weightRecordMapper.updateById(wr);
+            }
+        }
+        return m;
+    }
+
+    /** 读取正数（null / 非法 / <=0 一律返回 null 表示未填写） */
+    private Double readPositive(Object o) {
+        if (o instanceof Number) {
+            double d = ((Number) o).doubleValue();
+            return d > 0 ? d : null;
+        }
+        return null;
+    }
+
     /** 6 大健康组件总览（首页 + 个人健康页通用） */
     public Map<String, Object> overview() {
         Map<String, Object> d = new HashMap<>();
@@ -164,6 +312,7 @@ public class HealthService {
         d.put("trend", trend7d());
         d.put("exercise_dict", listExerciseDict());
         d.put("food_dict", listFoodDict(null));
+        d.put("body_metric", getBodyMetricLatest());
         return d;
     }
 
@@ -182,9 +331,58 @@ public class HealthService {
                 return recordWorkout(body);
             case "vital":
                 return recordVital(body);
+            case "steps":
+                return recordSteps(body);
             default:
                 throw new BizException("不支持的记录类型: " + type);
         }
+    }
+
+    /**
+     * 录入今日步数（覆盖式更新，同日重复录入为覆盖）。
+     *
+     * <p>步数消耗自动折算：kcal = steps × 体重(kg) × 0.0005（70kg 万步 ≈ 350 kcal，步行平均估算），
+     * 体重取最近一次体重记录（无则用默认 65kg）。</p>
+     *
+     * <p>同步 calorie_record 当日 burn：因为步数是覆盖式更新，
+     * burn 增量 = 新步数消耗 − 旧步数消耗（旧值存在 step_record.calories），保证消耗不重复累加。</p>
+     */
+    private Map<String, Object> recordSteps(Map<String, Object> body) {
+        Object s = body.get("steps");
+        if (!(s instanceof Number) || ((Number) s).intValue() < 0) {
+            throw new BizException("steps 必须为非负数字");
+        }
+        int steps = ((Number) s).intValue();
+        LocalDate date = LocalDate.now();
+        StepRecord old = stepRecordMapper.selectOne(
+                new LambdaQueryWrapper<StepRecord>().eq(StepRecord::getRecordDate, date));
+        double oldCalories = old != null && old.getCalories() != null ? old.getCalories() : 0;
+
+        // 步数消耗折算：steps × 体重(kg) × 0.0005
+        double weight = latestWeightOr(DEFAULT_WEIGHT_KG);
+        double calories = steps * weight * 0.0005;
+
+        StepRecord r;
+        if (old == null) {
+            r = new StepRecord();
+            r.setRecordDate(date);
+            r.setSteps(steps);
+            r.setCalories(round1(calories));
+            stepRecordMapper.insert(r);
+        } else {
+            r = old;
+            r.setSteps(steps);
+            r.setCalories(round1(calories));
+            stepRecordMapper.updateById(r);
+        }
+        // 覆盖式同步当日消耗（增量 = 新步数消耗 − 旧步数消耗）
+        syncCalorie(date, 0, round1(calories) - oldCalories);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", r.getId());
+        result.put("steps", steps);
+        result.put("caloriesBurned", round1(calories));
+        return result;
     }
 
     private Map<String, Object> recordWeight(Map<String, Object> body) {
@@ -460,6 +658,12 @@ public class HealthService {
                 .filter(d -> d.getCaloriesIntake() != null)
                 .mapToDouble(DietRecord::getCaloriesIntake)
                 .sum();
+        // 步数消耗计入今日总消耗（step_record.calories，录入步数时自动折算）
+        StepRecord todayStep = stepRecordMapper.selectOne(
+                new LambdaQueryWrapper<StepRecord>().eq(StepRecord::getRecordDate, today));
+        int stepsToday = todayStep != null && todayStep.getSteps() != null ? todayStep.getSteps() : 0;
+        double stepsBurn = todayStep != null && todayStep.getCalories() != null ? todayStep.getCalories() : 0;
+        burnToday += stepsBurn;
 
         Map<String, Object> dietByMeal = new LinkedHashMap<>();
         dietByMeal.put("breakfast", filterMeal(diets, "breakfast"));
@@ -472,6 +676,9 @@ public class HealthService {
         data.put("intake_today", Math.round(intakeToday));
         data.put("burn_today", Math.round(burnToday));
         data.put("net", Math.round(intakeToday - burnToday));
+        // 步数明细：今日步数 + 步数折算消耗（前端展示"含步数消耗 X kcal"）
+        data.put("steps_today", stepsToday);
+        data.put("steps_burn", Math.round(stepsBurn));
         data.put("target_intake", 1800);
         data.put("target_burn", 2200);
         data.put("workouts_today", workouts);
@@ -495,6 +702,15 @@ public class HealthService {
         Map<LocalDate, CalorieRecord> byDate = records.stream()
                 .collect(Collectors.toMap(CalorieRecord::getRecordDate, c -> c, (a, b) -> a, LinkedHashMap::new));
 
+        // 步数消耗按日合并：每天 burn += step_record.calories（录入步数时自动折算）
+        Map<LocalDate, Double> stepsBurnByDate = stepRecordMapper.selectList(
+                        new LambdaQueryWrapper<StepRecord>()
+                                .ge(StepRecord::getRecordDate, start)
+                                .le(StepRecord::getRecordDate, today))
+                .stream()
+                .filter(s -> s.getCalories() != null)
+                .collect(Collectors.toMap(StepRecord::getRecordDate, StepRecord::getCalories, (a, b) -> a));
+
         // 兜底：用 workout_record / diet_record 实时聚合补全 7 天
         List<Map<String, Object>> result = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
@@ -508,6 +724,11 @@ public class HealthService {
             }
             if (burn == 0) {
                 burn = sumWorkoutBurn(d);
+            }
+            // 步数消耗计入当日总消耗
+            Double stepsBurn = stepsBurnByDate.get(d);
+            if (stepsBurn != null) {
+                burn += (int) Math.round(stepsBurn);
             }
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("date", d.toString().substring(5)); // MM-dd

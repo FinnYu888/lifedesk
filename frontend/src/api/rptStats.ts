@@ -30,5 +30,9 @@ export interface RptTenantPassRate {
   modules: RptModuleStat[];
 }
 
-/** 双租户用例通过率（盐田 29 + 蛇口 30） */
-export const fetchRptPassRate = () => http.get<any, Result<RptTenantPassRate[]>>("/rpt-stats/pass-rate");
+/** 双租户用例通过率（盐田 29 + 蛇口 30）——后端需实时调 RPT 远程接口聚合，放宽到 30s */
+export const fetchRptPassRate = () =>
+  http.get<any, Result<RptTenantPassRate[]>>("/rpt-stats/pass-rate", {
+    timeout: 30000,
+    params: { _t: Date.now() }
+  });

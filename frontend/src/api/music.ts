@@ -72,10 +72,14 @@ async function postMultipart(path: string, fd: FormData): Promise<any> {
   return resp.json();
 }
 
-/** 曲目的可播放地址（外链用原地址；上传走后端流式接口） */
+/**
+ * 曲目的可播放地址：统一走后端流式代理。
+ * - 外链：后端 /music/{id}/file 服务端转发外部音频（浏览器不直连外部源，
+ *   规避本机网络代理/拦截导致的加载失败）；
+ * - 上传：同一接口输出本地文件。
+ * <audio> 元素无法携带 Authorization 头，用查询参数传 token（后端拦截器支持）。
+ */
 export function trackSrc(t: Pick<MusicTrack, "sourceType" | "url" | "id">): string {
-  if (t.sourceType !== "upload") return t.url || "";
-  // <audio> 元素无法携带 Authorization 头，用查询参数传 token（后端拦截器支持）
   const token = localStorage.getItem("lifedesk-token") || "";
   return `/api/music/${t.id}/file?token=${encodeURIComponent(token)}`;
 }
