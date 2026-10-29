@@ -282,6 +282,7 @@
         </div>
         <el-table
           v-else
+          v-loading="reqLoading"
           :data="requirements"
           size="small"
           class="req-table"
@@ -346,9 +347,12 @@
           >
         <div class="card-head">
           <div class="card-title">里程碑进度</div>
-          <span class="text-tertiary" style="font-size: 12px">按 Sprint 聚合</span>
+          <span class="text-tertiary" style="font-size: 12px">
+            {{ msLoading ? "刷新中…" : "按 Sprint 聚合" }}
+          </span>
         </div>
-        <div v-if="!milestones.length && authExpired" class="m-empty-hint">
+        <div v-if="msLoading && !milestones.length" class="m-empty-hint">正在刷新里程碑进度…</div>
+        <div v-else-if="!milestones.length && authExpired" class="m-empty-hint">
           鉴权信息已过期，请输入最新 authorization 后点击「保存并刷新」
         </div>
         <template v-else>
@@ -651,6 +655,10 @@ const active = ref<any[]>([]);
 const milestones = ref<RequirementMilestone[]>([]);
 const commits = ref<any[]>([]);
 const requirements = ref<Requirement[]>([]);
+/** 需求列表刷新中（保存鉴权后局部刷新时展示 loading） */
+const reqLoading = ref(false);
+/** 里程碑刷新中 */
+const msLoading = ref(false);
 
 // ===== 项目总览（合并统计卡）：主指标 + 次级指标 =====
 const ovMainMetrics = computed(() => [
@@ -919,7 +927,7 @@ async function loadRequirements() {
   }
 }
 
-/** 保存 authorization 并刷新"我的需求"+"里程碑进度" */
+/** 保存 authorization 并局部刷新"我的需求"+"里程碑进度"（不整页刷新） */
 async function onSaveAuthorization() {
   const token = authInput.value.trim();
   if (!token) {
@@ -928,34 +936,37 @@ async function onSaveAuthorization() {
   }
   authSaving.value = true;
   try {
-    console.log("[onSaveAuthorization] 开始设置 authorization, token 长度:", token.length);
     const r = await setRequirementAuthorization(token);
     authStatus.value = r.data;
     authExpired.value = false;
     authInput.value = "";
-    ElMessage.success("authorization 已保存，正在刷新数据");
-    console.log("[onSaveAuthorization] authorization 已设置成功，source=", r.data?.source, "，开始刷新需求列表 + 里程碑进度");
-    // 用 allSettled 让两个请求各自独立完成，互不影响（避免里程碑失败导致需求列表也不刷新）
-    const [reqResult, msResult] = await Promise.allSettled([
-      fetchRequirements(reqSprint.value, reqStatus.value, reqKeyword.value),
-      fetchRequirementMilestones()
-    ]);
-    if (reqResult.status === "fulfilled") {
-      requirements.value = reqResult.value.data || [];
-      console.log("[onSaveAuthorization] 需求列表刷新成功，数量:", requirements.value.length);
-    } else {
-      console.error("[onSaveAuthorization] 需求列表刷新失败:", reqResult.reason);
-      requirements.value = [];
+    ElMessage.success("authorization 已保存，正在局部刷新需求与里程碑…");
+    // 先局部刷新"我的需求"（快），再刷新"里程碑进度"（慢，需多次远程调用）；两者独立提示成败
+    reqLoading.value = true;
+    try {
+      const req = await fetchRequirements(reqSprint.value, reqStatus.value, reqKeyword.value);
+      requirements.value = req.data || [];
+      ElMessage.success(`我的需求已刷新（${requirements.value.length} 条）`);
+    } catch (e: any) {
+      ElMessage.error("我的需求刷新失败：" + (e?.message || "请求超时，请重试"));
+    } finally {
+      reqLoading.value = false;
     }
-    if (msResult.status === "fulfilled") {
-      milestones.value = msResult.value.data || [];
-      console.log("[onSaveAuthorization] 里程碑进度刷新成功，数量:", milestones.value.length);
-    } else {
-      console.error("[onSaveAuthorization] 里程碑进度刷新失败:", msResult.reason);
+    msLoading.value = true;
+    try {
+      const ms = await fetchRequirementMilestones();
+      milestones.value = ms.data || [];
+    } catch (e: any) {
+      ElMessage.warning("里程碑进度刷新失败：" + (e?.message || "请求超时，可稍后重试"));
+    } finally {
+      msLoading.value = false;
     }
+    // 刷新后重新拉取鉴权状态（展示生效来源）
+    try {
+      authStatus.value = (await getRequirementAuthStatus()).data;
+    } catch { /* 状态拉取失败不影响主流程 */ }
     authExpired.value = requirements.value.length === 0;
   } catch (e) {
-    console.error("[onSaveAuthorization] 整体失败:", e);
     /* 拦截器已提示 */
   } finally {
     authSaving.value = false;

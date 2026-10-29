@@ -52,7 +52,9 @@ public class ProjectController {
 
     /** 里程碑进度：从需求接口查询到的 sprint 聚合（CDS20261025 形式，后 8 位为里程碑日期） */
     @GetMapping("/milestones")
-    public R<List<Milestone>> milestones() {
+    public R<List<Milestone>> milestones(javax.servlet.http.HttpServletResponse response) {
+        // 实时聚合数据，禁止任何缓存（保存新鉴权后前端立即局部刷新，防止拿到旧响应）
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
         return R.ok(requirementService.listMilestones());
     }
 
@@ -73,7 +75,10 @@ public class ProjectController {
     @GetMapping("/requirements")
     public R<List<Requirement>> requirements(@RequestParam(required = false) String sprint,
                                               @RequestParam(required = false) String status,
-                                              @RequestParam(required = false) String keyword) {
+                                              @RequestParam(required = false) String keyword,
+                                              javax.servlet.http.HttpServletResponse response) {
+        // 实时透传远程接口数据，禁止任何缓存（保存新鉴权后前端立即局部刷新，防止拿到旧响应）
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
         return R.ok(requirementService.list(sprint, status, keyword));
     }
 

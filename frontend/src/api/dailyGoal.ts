@@ -28,3 +28,7 @@ export const fetchDailyGoals = (module: string) =>
 
 /** 修改每日目标（生成新里程碑 / 当天内原地更新 / 值未变幂等） */
 export const saveDailyGoal = (data: DailyGoal) => http.post<any, Result>("/daily-goal", data);
+
+/** 删除某模块某 scope 的目标（含里程碑历史），用于删除自定义目标（如运动目标） */
+export const deleteDailyGoal = (module: string, scope: string) =>
+  http.delete<any, Result>("/daily-goal", { params: { module, scope } });

@@ -189,11 +189,11 @@
         </div>
 
         <div class="ld-card">
-          <div class="hc-title">卡路里·摄入/消耗</div>
+          <div class="hc-title">卡路里·摄入/消耗（今日）</div>
           <div class="calo-box">
-            <div class="text-warning">本周摄入均值 <b>1920 kcal</b></div>
-            <div class="text-positive">本周消耗均值 <b>2380 kcal</b></div>
-            <div class="calo-net">今日净剩 <b class="text-positive">-320 kcal</b> · 赤字</div>
+            <div class="text-warning">今日摄入 <b>{{ intakeToday }} kcal</b></div>
+            <div class="text-positive">今日消耗 <b>{{ burnToday }} kcal</b></div>
+            <div class="calo-net">今日净额 <b :class="netToday > 0 ? 'text-warning' : 'text-positive'">{{ netToday > 0 ? "+" : "" }}{{ netToday }} kcal</b> · {{ netToday > 0 ? "盈余" : "赤字" }}</div>
           </div>
         </div>
 
@@ -204,19 +204,51 @@
 
         <div class="ld-card">
           <div class="hc-title">运动计划达成率</div>
-          <ProgressBar label="力量训练" :percent="84" color="#a78bfa" />
-          <ProgressBar label="有氧" :percent="65" color="#a78bfa" />
-          <ProgressBar label="柔韧" :percent="40" color="#fbbf24" />
-          <ProgressBar label="拉伸放松" :percent="90" color="#2dd4bf" />
+          <ProgressBar
+            v-for="b in exercisePlanBars"
+            :key="'p-' + b.label"
+            :label="b.label"
+            :percent="b.percent"
+            :color="b.color"
+          />
+          <ProgressBar
+            v-for="b in exerciseGoalBars"
+            :key="'g-' + b.label"
+            :label="b.label"
+            :percent="b.percent"
+            :color="b.color"
+          />
+          <div v-if="!exercisePlanBars.length && !exerciseGoalBars.length" class="text-tertiary" style="font-size: 12px">
+            暂无运动计划，可在「个人健康」页新增每日运动目标
+          </div>
         </div>
 
         <div class="ld-card">
-          <div class="hc-title">每日步数·目标 10,000</div>
+          <div class="hc-title">每日步数·目标 {{ stepsGoal.toLocaleString() }}</div>
           <div class="step-flex">
-            <RingChart :percent="84" :size="100" color="#a78bfa" />
+            <RingChart :percent="stepsPercent" :size="100" color="#a78bfa" />
             <div>
-              <div class="step-num">8,420</div>
-              <div class="text-secondary step-sub">本周共 7,820 · 距目标 +1,205</div>
+              <div class="step-num">{{ stepsToday.toLocaleString() }}</div>
+              <div class="text-secondary step-sub">今日已完成 {{ stepsPercent }}%</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ld-card">
+          <div class="hc-title">睡眠·水分（今日实际 vs 每日目标）</div>
+          <div class="vital-mini">
+            <div class="vm-row">
+              <span>睡眠</span>
+              <b>{{ sleepToday }} / {{ sleepGoal }} h · {{ sleepPercent }}%</b>
+            </div>
+            <ProgressBar label="睡眠目标" :percent="sleepPercent" color="#a78bfa" />
+            <div class="vm-row">
+              <span>水分</span>
+              <b>{{ (waterToday / 1000).toFixed(1) }} / {{ (waterGoal / 1000).toFixed(1) }} L · {{ waterPercent }}%</b>
+            </div>
+            <ProgressBar label="水分目标" :percent="waterPercent" color="#2dd4bf" />
+            <div class="text-tertiary" style="font-size: 11px">
+              在「个人健康」页每日目标区录入睡眠/饮水量，此处实时更新
             </div>
           </div>
         </div>
@@ -240,7 +272,8 @@ import ProgressBar from "@/components/ProgressBar.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 
 import { fetchGreeting, fetchModuleStat } from "@/api/dashboard";
-import { recordHealth } from "@/api/health";
+import { recordHealth, fetchHealthOverview } from "@/api/health";
+import { fetchDailyGoals } from "@/api/dailyGoal";
 import { fetchProjectStat, fetchProjectActive, fetchProjectCommits } from "@/api/project";
 import { fetchRptPassRate, type RptTenantPassRate } from "@/api/rptStats";
 import {
@@ -268,6 +301,79 @@ const milestones = ref<RequirementMilestone[]>([]);
 const requirements = ref<Requirement[]>([]);
 // 测试用例·通过率（双租户汇总）
 const rptStats = ref<RptTenantPassRate[]>([]);
+
+// ===== 健康区域真实数据：health overview（步数/今日运动/体征）+ 每日目标 =====
+const healthOv = ref<any>(null);
+const healthGoals = ref<any[]>([]);
+
+/** 某 scope 当前生效目标值（无则用默认值） */
+function goalVal(scope: string, def: number): number {
+  const g = healthGoals.value.find((x) => x.scope === scope);
+  const v = g ? parseFloat(g.goalValue) : NaN;
+  return isNaN(v) ? def : v;
+}
+const stepsGoal = computed(() => goalVal("steps", 10000));
+const stepsToday = computed(() => healthOv.value?.stat?.steps_today ?? 0);
+const stepsPercent = computed(() =>
+  stepsGoal.value > 0 ? Math.min(100, Math.round((stepsToday.value / stepsGoal.value) * 100)) : 0
+);
+const sleepGoal = computed(() => goalVal("sleep", 8));
+const sleepToday = computed(() => healthOv.value?.vital?.sleepHours ?? 0);
+const sleepPercent = computed(() =>
+  sleepGoal.value > 0 ? Math.min(100, Math.round(((sleepToday.value || 0) / sleepGoal.value) * 100)) : 0
+);
+const waterGoal = computed(() => goalVal("water", 2500));
+const waterToday = computed(() => healthOv.value?.vital?.waterMl ?? 0);
+const waterPercent = computed(() =>
+  waterGoal.value > 0 ? Math.min(100, Math.round(((waterToday.value || 0) / waterGoal.value) * 100)) : 0
+);
+const intakeToday = computed(() => healthOv.value?.today_summary?.intake_today ?? 0);
+const burnToday = computed(() => healthOv.value?.today_summary?.burn_today ?? 0);
+const netToday = computed(() => intakeToday.value - burnToday.value);
+
+/** 静态运动计划达成率（exercise_plan 表） */
+const exercisePlanBars = computed(() =>
+  (healthOv.value?.exercise || []).map((e: any) => ({
+    label: e.category,
+    percent: e.rate ?? 0,
+    color: (e.rate ?? 0) >= 60 ? "#a78bfa" : "#fbbf24"
+  }))
+);
+
+/** 自定义每日运动目标完成进度（今日该运动实际 组数/时长 vs 目标） */
+const exerciseGoalBars = computed(() =>
+  (healthGoals.value || [])
+    .filter((g) => (g.scope || "").startsWith("exercise:"))
+    .map((g) => {
+      const name = (g.scope || "").replace("exercise:", "");
+      const unit = g.unit || "组";
+      const ws = (healthOv.value?.today_summary?.workouts_today || []).filter(
+        (w: any) => w.exerciseName === name
+      );
+      const actual =
+        unit === "min"
+          ? ws.reduce((s: number, w: any) => s + (w.durationMin || 0), 0)
+          : ws.reduce((s: number, w: any) => s + (w.sets || 0), 0);
+      const goal = parseFloat(g.goalValue) || 0;
+      const percent = goal > 0 ? Math.min(100, Math.round((actual / goal) * 100)) : 0;
+      return {
+        label: `${name}（${actual}/${goal}${unit}）`,
+        percent,
+        color: percent >= 80 ? "#2dd4bf" : percent >= 50 ? "#a78bfa" : "#fbbf24"
+      };
+    })
+);
+
+/** 加载健康真实数据（独立加载，失败不阻塞首页主数据） */
+async function loadHealth() {
+  try {
+    const [ov, g] = await Promise.all([fetchHealthOverview(), fetchDailyGoals("health")]);
+    healthOv.value = ov.data;
+    healthGoals.value = g.data?.current || [];
+  } catch {
+    /* 拦截器已提示 */
+  }
+}
 
 const dateStr =
   new Date().toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }).replace("/", "月") + "日";
@@ -469,6 +575,7 @@ const weightChartOption = computed(() => ({
 onMounted(() => {
   loadAll();
   loadRptStats();
+  loadHealth();
 });
 </script>
 
@@ -589,6 +696,23 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
+}
+/* 睡眠·水分迷你卡 */
+.vital-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vm-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+  color: $text-secondary;
+  b {
+    color: $text-primary;
+    font-weight: 600;
+  }
 }
 
 /* ========== 项目管理仪表盘 ========== */

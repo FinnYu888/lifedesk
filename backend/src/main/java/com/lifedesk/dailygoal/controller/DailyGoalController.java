@@ -35,4 +35,10 @@ public class DailyGoalController {
     public R<DailyGoal> save(@RequestBody DailyGoal goal) {
         return R.ok(dailyGoalService.save(goal));
     }
+
+    /** 删除某模块某 scope 的目标（含里程碑历史），用于删除自定义目标 */
+    @DeleteMapping
+    public R<Integer> delete(@RequestParam String module, @RequestParam String scope) {
+        return R.ok(dailyGoalService.deleteScope(module, scope));
+    }
 }

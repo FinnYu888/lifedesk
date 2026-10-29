@@ -13,7 +13,10 @@
         <div class="card-title">每日目标
           <span class="goal-stage-badge">第 {{ goalStage }} 阶段</span>
         </div>
-        <span class="goal-tip">修改目标并保存即生成新里程碑（进入下一阶段），看板按各阶段目标计算达成率</span>
+        <div class="goal-head-right">
+          <span class="goal-tip">修改目标并保存即生成新里程碑（进入下一阶段），看板按各阶段目标计算达成率</span>
+          <el-button type="primary" size="small" :icon="Plus" @click="openAddGoalDialog">新增运动目标</el-button>
+        </div>
       </div>
       <div class="goal-grid">
         <div v-for="m in HEALTH_METRICS" :key="m.key" class="goal-item">
@@ -41,6 +44,39 @@
               @click="onSaveGoal(m)"
             >设为目标</el-button>
           </div>
+          <!-- 睡眠/水分：支持每日实际值输入，输入后与目标比对计算完成百分比 -->
+          <div v-if="m.key === 'sleep' || m.key === 'water'" class="gi-edit record">
+            <span class="gi-rec-label">今日</span>
+            <el-input-number
+              v-model="vitalForm[m.key]"
+              :min="0"
+              :max="m.key === 'sleep' ? 24 : 10000"
+              :step="m.step"
+              size="small"
+              :controls="false"
+              placeholder="输入实际值"
+            />
+            <span class="gi-unit">{{ m.unit }}</span>
+            <el-button
+              size="small"
+              :loading="vitalSavingKey === m.key"
+              :disabled="vitalForm[m.key] == null"
+              @click="onSaveVital(m.key)"
+            >记录</el-button>
+          </div>
+        </div>
+        <!-- 动态运动目标：枚举来自「添加运动」的运动字典，实际值取今日该运动记录 -->
+        <div v-for="g in exerciseGoals" :key="g.scope" class="goal-item">
+          <div class="gi-head">
+            <span class="gi-label">{{ g.label || g.scope.replace("exercise:", "") }}</span>
+            <el-icon class="gi-del" title="删除该目标" @click="onDeleteExerciseGoal(g)"><Close /></el-icon>
+          </div>
+          <ProgressBar
+            :label="`目标 ${g.goalValue}${g.unit || '组'}`"
+            :percent="exerciseGoalPercent(g)"
+            :color="progressColor(exerciseGoalPercent(g))"
+          />
+          <div class="gi-actual-sub">今日 {{ exerciseGoalActual(g) }}{{ g.unit || "组" }} / {{ g.goalValue }}{{ g.unit || "组" }}</div>
         </div>
       </div>
       <!-- 里程碑时间线：每日目标变更历史 -->
@@ -243,6 +279,45 @@
         <el-button type="primary" :loading="submitting" @click="submitDiet">提交</el-button>
       </template>
     </el-dialog>
+
+    <!-- 新增运动目标弹窗：枚举与「添加运动」一致（运动字典按部位分组） -->
+    <el-dialog v-model="addGoalDialog.visible" title="新增每日运动目标" width="460px" :close-on-click-modal="false">
+      <el-form label-width="84px" label-position="left">
+        <el-form-item label="运动动作" required>
+          <el-select v-model="addGoalDialog.exerciseId" placeholder="选择运动动作" filterable style="width: 100%" @change="onGoalExercisePick">
+            <el-option-group v-for="g in exerciseDictByPart" :key="g.part" :label="g.part">
+              <el-option v-for="d in g.list" :key="d.id" :label="d.name" :value="d.id" />
+            </el-option-group>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="计量方式">
+          <el-radio-group v-model="addGoalDialog.unit">
+            <el-radio-button label="组">按组数（力量）</el-radio-button>
+            <el-radio-button label="min">按时长·分钟（有氧）</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="每日目标" required>
+          <el-input-number
+            v-model="addGoalDialog.value"
+            :min="1"
+            :max="addGoalDialog.unit === '组' ? 100 : 600"
+            :step="addGoalDialog.unit === '组' ? 1 : 10"
+            :controls="false"
+            style="width: 140px"
+          />
+          <span class="ml8 text-tertiary">{{ addGoalDialog.unit }}</span>
+        </el-form-item>
+        <el-form-item label="完成判定">
+          <div class="text-tertiary" style="font-size: 12px">
+            今日该运动{{ addGoalDialog.unit === "组" ? "总组数" : "总时长" }} ≥ 目标即算完成，进度实时反映在健康页与首页
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addGoalDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="addGoalDialog.saving" @click="submitAddGoal">保存目标</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -266,8 +341,9 @@ import {
   addDiet,
   deleteWorkout,
   deleteDiet,
+  recordHealth,
 } from "@/api/health";
-import { fetchDailyGoals, saveDailyGoal, type DailyGoal } from "@/api/dailyGoal";
+import { fetchDailyGoals, saveDailyGoal, deleteDailyGoal, type DailyGoal } from "@/api/dailyGoal";
 
 use([CanvasRenderer, BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent]);
 
@@ -454,6 +530,121 @@ async function onSaveGoal(m: MetricDef) {
     /* 拦截器已提示 */
   } finally {
     goalSavingKey.value = null;
+  }
+}
+
+// ===== 动态运动目标（scope = exercise:<动作名>，枚举来自运动字典） =====
+/** 自定义运动目标列表（scope 以 exercise: 开头） */
+const exerciseGoals = computed(() =>
+  (goalBoard.value.current || []).filter((g) => (g.scope || "").startsWith("exercise:"))
+);
+
+/** 某运动目标今日实际值：unit=组 → 今日该动作总组数；unit=min → 今日该动作总时长 */
+function exerciseGoalActual(g: DailyGoal): number {
+  const name = (g.scope || "").replace("exercise:", "");
+  const ws = (summary.value?.workouts_today || []).filter((w: any) => w.exerciseName === name);
+  if ((g.unit || "组") === "min") {
+    return ws.reduce((s: number, w: any) => s + (w.durationMin || 0), 0);
+  }
+  return ws.reduce((s: number, w: any) => s + (w.sets || 0), 0);
+}
+
+function exerciseGoalPercent(g: DailyGoal): number {
+  const goal = parseFloat(g.goalValue);
+  if (!goal || goal <= 0) return 0;
+  return Math.min(100, Math.round((exerciseGoalActual(g) / goal) * 100));
+}
+
+// 新增运动目标弹窗
+const addGoalDialog = reactive<{ visible: boolean; exerciseId: number | null; value: number | null; unit: string; saving: boolean }>({
+  visible: false,
+  exerciseId: null,
+  value: null,
+  unit: "组",
+  saving: false
+});
+
+function openAddGoalDialog() {
+  addGoalDialog.exerciseId = null;
+  addGoalDialog.value = null;
+  addGoalDialog.unit = "组";
+  addGoalDialog.visible = true;
+}
+
+function onGoalExercisePick(id: number) {
+  const d = exerciseDict.value.find((x: any) => x.id === id);
+  if (d) {
+    // 有氧默认按时长计目标，力量按组数
+    addGoalDialog.unit = d.part === "有氧" || d.part === "拉伸" ? "min" : "组";
+    addGoalDialog.value = addGoalDialog.unit === "min" ? 30 : 4;
+  }
+}
+
+async function submitAddGoal() {
+  if (!addGoalDialog.exerciseId) {
+    ElMessage.warning("请选择运动动作");
+    return;
+  }
+  if (!addGoalDialog.value || addGoalDialog.value <= 0) {
+    ElMessage.warning("请填写每日目标值");
+    return;
+  }
+  const d = exerciseDict.value.find((x: any) => x.id === addGoalDialog.exerciseId);
+  if (!d) return;
+  addGoalDialog.saving = true;
+  try {
+    await saveDailyGoal({
+      module: "health",
+      scope: `exercise:${d.name}`,
+      label: d.name,
+      goalValue: String(addGoalDialog.value),
+      unit: addGoalDialog.unit
+    });
+    ElMessage.success(`已新增每日目标：${d.name} ${addGoalDialog.value}${addGoalDialog.unit}`);
+    addGoalDialog.visible = false;
+    await loadGoals();
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    addGoalDialog.saving = false;
+  }
+}
+
+async function onDeleteExerciseGoal(g: DailyGoal) {
+  const name = (g.scope || "").replace("exercise:", "");
+  try {
+    await ElMessageBox.confirm(`确定删除目标「${name}」？其里程碑历史将一并移除`, "提示", { type: "warning" });
+  } catch {
+    return;
+  }
+  try {
+    await deleteDailyGoal("health", g.scope!);
+    ElMessage.success("目标已删除");
+    await loadGoals();
+  } catch {
+    /* 拦截器已提示 */
+  }
+}
+
+// ===== 今日睡眠/水分输入（记录后与目标比对刷新完成百分比） =====
+const vitalForm = reactive<{ sleep: number | null; water: number | null }>({ sleep: null, water: null });
+const vitalSavingKey = ref<string | null>(null);
+
+async function onSaveVital(key: "sleep" | "water") {
+  const v = vitalForm[key];
+  if (v == null) return;
+  vitalSavingKey.value = key;
+  try {
+    const body: Record<string, number> = { recordType: "vital" };
+    if (key === "sleep") body.sleepHours = v;
+    else body.waterMl = Math.round(v);
+    await recordHealth(body);
+    ElMessage.success(key === "sleep" ? `已记录今日睡眠 ${v} 小时` : `已记录今日饮水 ${v} 毫升`);
+    await loadOverview();
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    vitalSavingKey.value = null;
   }
 }
 
@@ -726,6 +917,9 @@ async function loadOverview() {
     vital.value = d.vital;
     exerciseDict.value = d.exercise_dict || [];
     foodDict.value = d.food_dict || [];
+    // 今日实际值预填（睡眠/水分输入框）
+    vitalForm.sleep = vital.value?.sleepHours ?? null;
+    vitalForm.water = vital.value?.waterMl ?? null;
   } catch (e) {
     // 兜底：单独调字典与汇总接口
     try {
@@ -794,6 +988,11 @@ onMounted(() => {
   font-size: 11px;
   color: $text-tertiary;
 }
+.goal-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .goal-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -828,6 +1027,27 @@ onMounted(() => {
   .el-input-number {
     width: 92px;
   }
+  &.record {
+    padding-top: 6px;
+    border-top: 1px dashed $border-subtle;
+  }
+}
+.gi-rec-label {
+  font-size: 11px;
+  color: $text-tertiary;
+  white-space: nowrap;
+}
+.gi-del {
+  cursor: pointer;
+  color: $text-tertiary;
+  font-size: 14px;
+  &:hover {
+    color: #ef4444;
+  }
+}
+.gi-actual-sub {
+  font-size: 11px;
+  color: $text-tertiary;
 }
 .gi-unit {
   font-size: 11px;

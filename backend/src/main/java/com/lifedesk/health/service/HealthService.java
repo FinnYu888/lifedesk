@@ -73,14 +73,24 @@ public class HealthService {
     // 原有六组件只读接口（保留）
     // ============================================================
 
-    /** 统计卡：周完成率 82% / 今日步数 8,420 / 体重 65.2 */
+    /** 统计卡：周完成率 / 今日步数（step_record 当日真实值） / 体重（最近记录） */
     public Map<String, Object> getStat() {
         Map<String, Object> stat = new HashMap<>();
         stat.put("week_rate", 82);
         stat.put("week_rate_delta", "+6%");
-        stat.put("steps_today", 8420);
-        stat.put("steps_percent", 84);
-        stat.put("weight", 65.2);
+        // 今日步数：读取 step_record 当日记录，无记录则为 0（配合每日步数目标计算完成百分比）
+        StepRecord todayStep = stepRecordMapper.selectOne(
+                new LambdaQueryWrapper<StepRecord>().eq(StepRecord::getRecordDate, LocalDate.now()));
+        int stepsToday = todayStep != null && todayStep.getSteps() != null ? todayStep.getSteps() : 0;
+        stat.put("steps_today", stepsToday);
+        // 体重：最近一条记录；无记录用默认值
+        WeightRecord latestWeight = weightRecordMapper.selectOne(
+                new LambdaQueryWrapper<WeightRecord>()
+                        .isNotNull(WeightRecord::getWeight)
+                        .orderByDesc(WeightRecord::getRecordDate)
+                        .last("LIMIT 1"));
+        double weight = latestWeight != null && latestWeight.getWeight() != null ? latestWeight.getWeight() : 65.2;
+        stat.put("weight", weight);
         stat.put("weight_delta", -0.6);
         stat.put("weight_target", WEIGHT_TARGET);
         return stat;

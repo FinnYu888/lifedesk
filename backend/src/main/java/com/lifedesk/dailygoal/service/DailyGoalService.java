@@ -122,4 +122,22 @@ public class DailyGoalService {
                         .last("LIMIT 1"));
         return list.isEmpty() ? null : list.get(0);
     }
+
+    /**
+     * 删除某模块某 scope 的目标（含全部里程碑历史）。
+     * 用于删除自定义目标（如运动目标）：目标与其里程碑一并移除。
+     *
+     * @return 删除的记录数
+     */
+    public int deleteScope(String module, String scope) {
+        if (module == null || module.trim().isEmpty() || scope == null || scope.trim().isEmpty()) {
+            throw new BizException("module 和 scope 不能为空");
+        }
+        int n = dailyGoalMapper.delete(
+                new LambdaQueryWrapper<DailyGoal>()
+                        .eq(DailyGoal::getModule, module.trim())
+                        .eq(DailyGoal::getScope, scope.trim()));
+        log.info("[DailyGoal] 删除目标 {}.{}，共 {} 条记录（含里程碑）", module, scope, n);
+        return n;
+    }
 }
